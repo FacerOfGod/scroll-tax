@@ -162,7 +162,7 @@ class ScrollDetectionService : Service() {
 
     private fun getThresholdSeconds(): Long {
         val prefs = getSharedPreferences("ScrollTaxPrefs", Context.MODE_PRIVATE)
-        return prefs.getInt("thresholdSeconds", 5).toLong()
+        return prefs.getInt("thresholdSeconds", 30).toLong()
     }
 
     private fun friendlyName(pkg: String) = when (pkg) {

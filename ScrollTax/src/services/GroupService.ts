@@ -70,8 +70,7 @@ class GroupService {
           penalties_incurred,
           groups (*)
         `)
-        .eq('user_id', userId)
-        .eq('status', 'active');
+        .eq('user_id', userId);
 
       if (error) throw error;
       return { data, error: null };

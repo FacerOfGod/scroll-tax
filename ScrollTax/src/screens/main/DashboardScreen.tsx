@@ -227,12 +227,13 @@ const DashboardScreen = ({ navigation }: any) => {
       .eq('user_id', link.telegram_id);
     if (!participations?.length) { setTelegramSession(null); return; }
 
-    const { data: session } = await supabase
+    const { data: sessions } = await supabase
       .from('sessions')
-      .select('id, duration, stake, created_at, banned_apps')
+      .select('*')
       .in('id', participations.map((p: any) => p.session_id))
       .eq('status', 'active')
-      .single();
+      .limit(1);
+    const session = sessions?.[0] ?? null;
     if (!session) { setTelegramSession(null); return; }
 
     const { count } = await supabase
@@ -240,7 +241,7 @@ const DashboardScreen = ({ navigation }: any) => {
       .select('id', { count: 'exact', head: true })
       .eq('session_id', session.id);
 
-    setTelegramSession({ ...session, participantCount: count ?? 0 });
+    setTelegramSession({ ...session, banned_apps: session.banned_apps ?? [], participantCount: count ?? 0 });
   }, [user?.id]);
 
   useFocusEffect(
@@ -248,6 +249,10 @@ const DashboardScreen = ({ navigation }: any) => {
       if (!user?.id) return;
 
       fetchTelegramSession();
+
+      // Set threshold immediately so the native service uses 30 s from the start,
+      // not the SharedPrefs default of 5 s that applies until the async DB call finishes.
+      ScrollDetectionService.updateSettings({ thresholdSeconds: 30 });
 
       if (Platform.OS === 'android' && Platform.Version >= 33) {
         PermissionsAndroid.request(
@@ -264,10 +269,7 @@ const DashboardScreen = ({ navigation }: any) => {
         const bannedApps = telegramSession?.banned_apps?.length
           ? telegramSession.banned_apps
           : (group?.banned_apps ?? []);
-        ScrollDetectionService.updateSettings({
-          bannedApps,
-          thresholdSeconds: 30,
-        });
+        ScrollDetectionService.updateSettings({ bannedApps });
       });
     }, [user?.id]),
   );
