@@ -1,95 +1,117 @@
-# ScrollTax
+# Monetize your friends addiction
 
-A mobile app that gamifies digital wellness using real financial stakes on the XRP Ledger. Users form accountability groups, stake XRP, and pay automatic penalties when they scroll banned apps beyond their set limits.
+> Turn screen-time guilt into crypto stakes. ScrollTax makes you and your group pay literally for doomscrolling.
+
+ScrollTax is a **React Native** mobile app + **Telegram bot** that gamifies digital wellness through financial accountability. Spend too long on TikTok, Instagram, or any banned app? Your staked crypto gets automatically transferred to your friend.
+
+---
 
 ## How it works
 
-1. **Create or join a group** — stake XRP into the group treasury (creator's XRPL wallet)
-2. **Set banned apps & scroll thresholds** — e.g. Instagram: 30 min/day
-3. **Scroll tracking** — Android AccessibilityService detects usage in real time
-4. **Penalty** — exceeding a threshold triggers a real XRP payment to the group treasury, recorded on-chain and in the database
-5. **End the group** — the creator distributes funds manually based on the leaderboard
+1. **Create or join a group** — stake XRP or use the Telegram bot to stake TON.
+2. **Set your banned apps** — any app you want to scroll less on.
+3. **ScrollTax watches** — a native Android Accessibility Service detects scroll events in real time.
+4. **Get penalized** — exceed your threshold and a penalty payment fires automatically to the other members of the group.
+5. **Win the pot** — the most disciplined member walks away with everyone's stakes.
+
+---
+
+## Platforms
+
+| Platform | Status |
+|---|---|
+| Android app (React Native) | ✅ Supported |
+| Telegram bot | ✅ Supported |
+| iOS | ⚠️ Not supported (AccessibilityService is Android-only) |
+
+---
+
+## Blockchain support
+
+ScrollTax supports two chains for staking and penalties:
+
+### XRP Ledger (XRPL)
+- Network: Testnet (`wss://s.altnet.rippletest.net:51233`)
+- SDK: `xrpl` v4.6
+- Wallet seeds stored securely via `react-native-keychain`
+- The group creator's XRPL address acts as the group treasury
+
+### TON (The Open Network)
+- Native integration via the Telegram bot @scrolltaxbot
+- TON wallets used for staking and penalty transactions within Telegram groups
+- Enables zero-friction onboarding for Telegram-native users
+
+---
 
 ## Tech stack
 
-| Layer | Technology |
-|---|---|
-| Mobile | React Native 0.84.1 + TypeScript |
-| Blockchain | XRPL Testnet via `xrpl` SDK v4.6 |
-| Backend | Supabase (PostgreSQL + Auth + RLS) |
-| Native (Android) | Kotlin `AccessibilityService` for scroll detection |
-| Secure storage | `react-native-keychain` (XRPL wallet seed) |
-| Telegram bot | Node.js + Telegraf |
+- **Frontend:** React Native 0.84.1 + TypeScript + React Navigation
+- **Telegram bot:** TON-integrated bot for group creation and penalty tracking
+- **Blockchain:** XRPL + TON
+- **Backend:** Supabase (PostgreSQL + Auth + Row-Level Security)
+- **Native (Android):** Kotlin `AccessibilityService` for real-time scroll detection
+- **Secure storage:** `react-native-keychain`
+
+---
+
+## Getting started
+
+> Make sure you have completed the [React Native environment setup](https://reactnative.dev/docs/set-up-your-environment) before proceeding.
+
+### Step 1: Start Metro
+
+```sh
+# Using npm
+npm start
+
+# OR using Yarn
+yarn start
+```
+
+### Step 2: Run the app
+
+**Android:**
+
+```sh
+npm run android
+# OR
+yarn android
+```
+
+**iOS** — not officially supported, but if you want to try:
+
+```sh
+bundle install
+bundle exec pod install
+npm run ios
+```
+
+### Step 3: Enable the Accessibility Service
+
+On your Android device, go to **Settings → Accessibility** and enable the ScrollTax service to allow scroll detection on banned apps.
+
+---
 
 ## Project structure
 
 ```
-scroll-tax/
-├── ScrollTax/          # React Native app (Android)
-│   ├── src/
-│   │   ├── screens/    # auth/, main/, onboarding/
-│   │   └── services/   # XrplService, GroupService, etc.
-│   └── android/        # Kotlin AccessibilityService
-├── telegram-bot/       # Telegram bot companion
-│   ├── index.js
-│   ├── walletService.js
-│   └── .env.example
+ScrollTax/
+├── src/
+│   ├── screens/
+│   │   ├── auth/          # Login, Signup
+│   │   ├── main/          # Dashboard, Groups, GroupDashboard, DistractionSettings
+│   │   └── onboarding/    # Onboarding
+│   └── services/          # XrplService, GroupService, SupabaseService
+├── android/
+│   └── app/src/main/java/com/scrolltax/   # Kotlin AccessibilityService
 └── supabase/
-    └── functions/      # Edge functions (join, link)
+    └── migrations/        # DB schema
 ```
 
-## Getting started
+---
 
-### React Native app
+## Troubleshooting
 
-```bash
-cd ScrollTax
-npm install
-npx react-native run-android
-```
-
-Copy `.env.example` to `.env` and fill in your Supabase credentials.
-
-### Telegram bot
-
-```bash
-cd telegram-bot
-npm install
-cp .env.example .env
-# Fill in BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY, BOT_ENCRYPTION_KEY
-node index.js
-```
-
-### Supabase
-
-Deploy edge functions:
-
-```bash
-supabase functions deploy join
-supabase functions deploy link
-```
-
-## Environment variables
-
-### ScrollTax app (`ScrollTax/.env`)
-
-| Variable | Description |
-|---|---|
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_ANON_KEY` | Supabase anon/public key |
-
-### Telegram bot (`telegram-bot/.env`)
-
-| Variable | Description |
-|---|---|
-| `BOT_TOKEN` | Telegram bot token from @BotFather |
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_KEY` | Supabase service role key |
-| `BOT_ENCRYPTION_KEY` | 32-byte hex key for wallet encryption |
-| `TON_ENDPOINT` | TON API endpoint (optional) |
-
-## Notes
-
-- Android only — scroll detection relies on `AccessibilityService`, which is Android-specific
-- XRPL Testnet — get free test XRP from the [XRPL faucet](https://xrpl.org/xrp-testnet-faucet.html)
-- The group creator's XRPL address acts as the group treasury wallet
+- [React Native Troubleshooting](https://reactnative.dev/docs/troubleshooting)
+- If the penalty doesn't fire, make sure the Accessibility Service is enabled and the app is in your banned-apps list.
+- XRPL uses Ripple epoch time — Unix timestamp minus `946684800`.
