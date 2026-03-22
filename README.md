@@ -12,7 +12,7 @@ ScrollTax is a **React Native** mobile app + **Telegram bot** that gamifies digi
 2. **Set your banned apps** — any app you want to scroll less on.
 3. **ScrollTax watches** — a native Android Accessibility Service detects scroll events in real time.
 4. **Get penalized** — exceed your threshold and a penalty payment fires automatically to the other members of the group.
-5. **Win the pot** — the most disciplined member walks away with everyone's stakes.
+5. **Win money** — The more your friends fail, the more money you make. But beware, the same goes for you.
 
 ---
 
@@ -88,7 +88,7 @@ npm run ios
 
 ### Step 3: Enable the Accessibility Service
 
-On your Android device, go to **Settings → Accessibility** and enable the ScrollTax service to allow scroll detection on banned apps.
+On your Android device, go to **Settings → App Usage** and enable the ScrollTax service to allow scroll detection on banned apps.
 
 ---
 
@@ -114,4 +114,4 @@ ScrollTax/
 
 - [React Native Troubleshooting](https://reactnative.dev/docs/troubleshooting)
 - If the penalty doesn't fire, make sure the Accessibility Service is enabled and the app is in your banned-apps list.
-- XRPL uses Ripple epoch time — Unix timestamp minus `946684800`.
+- If TON transactions fail with error 429, it is highly due to the TonCenter free plan limits.
