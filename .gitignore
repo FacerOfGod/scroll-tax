@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Lock files (generated, not committed at root)
+package-lock.json
+
+# Environment variables (contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Supabase
+supabase/.temp/
+
+# Claude Code personal memory
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
