@@ -1,14 +1,64 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Monetize your friends addiction
 
-# Getting Started
+> Turn screen-time guilt into crypto stakes. ScrollTax makes you and your group pay literally for doomscrolling.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+ScrollTax is a **React Native** mobile app + **Telegram bot** that gamifies digital wellness through financial accountability. Spend too long on TikTok, Instagram, or any banned app? Your staked crypto gets automatically transferred to your friend.
 
-## Step 1: Start Metro
+---
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## How it works
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+1. **Create or join a group** — stake XRP or use the Telegram bot to stake TON.
+2. **Set your banned apps** — any app you want to scroll less on.
+3. **ScrollTax watches** — a native Android Accessibility Service detects scroll events in real time.
+4. **Get penalized** — exceed your threshold and a penalty payment fires automatically to the other members of the group.
+5. **Win the pot** — the most disciplined member walks away with everyone's stakes.
+
+---
+
+## Platforms
+
+| Platform | Status |
+|---|---|
+| Android app (React Native) | ✅ Supported |
+| Telegram bot | ✅ Supported |
+| iOS | ⚠️ Not supported (AccessibilityService is Android-only) |
+
+---
+
+## Blockchain support
+
+ScrollTax supports two chains for staking and penalties:
+
+### XRP Ledger (XRPL)
+- Network: Testnet (`wss://s.altnet.rippletest.net:51233`)
+- SDK: `xrpl` v4.6
+- Wallet seeds stored securely via `react-native-keychain`
+- The group creator's XRPL address acts as the group treasury
+
+### TON (The Open Network)
+- Native integration via the Telegram bot @scrolltaxbot
+- TON wallets used for staking and penalty transactions within Telegram groups
+- Enables zero-friction onboarding for Telegram-native users
+
+---
+
+## Tech stack
+
+- **Frontend:** React Native 0.84.1 + TypeScript + React Navigation
+- **Telegram bot:** TON-integrated bot for group creation and penalty tracking
+- **Blockchain:** XRPL + TON
+- **Backend:** Supabase (PostgreSQL + Auth + Row-Level Security)
+- **Native (Android):** Kotlin `AccessibilityService` for real-time scroll detection
+- **Secure storage:** `react-native-keychain`
+
+---
+
+## Getting started
+
+> Make sure you have completed the [React Native environment setup](https://reactnative.dev/docs/set-up-your-environment) before proceeding.
+
+### Step 1: Start Metro
 
 ```sh
 # Using npm
@@ -18,80 +68,50 @@ npm start
 yarn start
 ```
 
-## Step 2: Build and run your app
+### Step 2: Run the app
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+**Android:**
 
 ```sh
-# Using npm
 npm run android
-
-# OR using Yarn
+# OR
 yarn android
 ```
 
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+**iOS** — not officially supported, but if you want to try:
 
 ```sh
 bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
 bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
 npm run ios
-
-# OR using Yarn
-yarn ios
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+### Step 3: Enable the Accessibility Service
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+On your Android device, go to **Settings → Accessibility** and enable the ScrollTax service to allow scroll detection on banned apps.
 
-## Step 3: Modify your app
+---
 
-Now that you have successfully run the app, let's make changes!
+## Project structure
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+```
+ScrollTax/
+├── src/
+│   ├── screens/
+│   │   ├── auth/          # Login, Signup
+│   │   ├── main/          # Dashboard, Groups, GroupDashboard, DistractionSettings
+│   │   └── onboarding/    # Onboarding
+│   └── services/          # XrplService, GroupService, SupabaseService
+├── android/
+│   └── app/src/main/java/com/scrolltax/   # Kotlin AccessibilityService
+└── supabase/
+    └── migrations/        # DB schema
+```
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+---
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+## Troubleshooting
 
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+- [React Native Troubleshooting](https://reactnative.dev/docs/troubleshooting)
+- If the penalty doesn't fire, make sure the Accessibility Service is enabled and the app is in your banned-apps list.
+- XRPL uses Ripple epoch time — Unix timestamp minus `946684800`.
