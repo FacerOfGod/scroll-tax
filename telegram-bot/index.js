@@ -30,7 +30,21 @@ bot.start(async (ctx) => {
     return ctx.reply("⚠️ Please use /start in a private chat with me.")
   }
 
-  ctx.reply("Welcome to ScrollTaxBot 🚀")
+  const commandList = `Welcome to ScrollTaxBot 🚀
+
+Here's what I can do:
+
+/start — Show this message
+/ping — Check if the bot is alive
+/create — Create a new scroll-tax session
+  Usage: /create -time <minutes> -stake <TON> [-penalty <TON>] [-apps <app1,app2>]
+/close — Close your active session
+/banned — Show banned apps in your current session
+/join — Join a session by ID
+/participants — List participants in your session
+/wallet — View or create your TON wallet`
+
+  await ctx.reply(commandList)
 
   const userId = ctx.from.id.toString()
 
@@ -42,7 +56,7 @@ bot.start(async (ctx) => {
 
   if (!linked) {
     const linkUrl = `${process.env.SUPABASE_URL}/functions/v1/link?telegram_id=${userId}`
-    ctx.reply("📱 Link your ScrollTax account to get started:", {
+    await ctx.reply("📱 Link your ScrollTax account to get started:", {
       reply_markup: {
         inline_keyboard: [[
           { text: "🔗 Link Account", url: linkUrl }
@@ -368,19 +382,23 @@ bot.command('join', async (ctx) => {
 })
 
 bot.command('participants', async (ctx) => {
-  const text = ctx.message.text
-  const parts = text.split(' ')
+  const chatId = ctx.chat.id.toString()
 
-  if (parts.length < 2) {
-    return ctx.reply("❌ Usage:\n/participants SESSION_ID")
+  const { data: session, error: sessionError } = await supabase
+    .from('sessions')
+    .select('id')
+    .eq('chat_id', chatId)
+    .eq('status', 'active')
+    .single()
+
+  if (sessionError || !session) {
+    return ctx.reply("❌ No active session in this group")
   }
-
-  const sessionId = parts[1]
 
   const { data, error } = await supabase
     .from('participants')
     .select('*')
-    .eq('session_id', sessionId)
+    .eq('session_id', session.id)
 
   if (error) {
     console.error(error)

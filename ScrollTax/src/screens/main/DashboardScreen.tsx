@@ -170,6 +170,7 @@ const DashboardScreen = ({ navigation }: any) => {
   const handlePenaltyRef       = useRef<(pkg: string, dur: number) => Promise<void>>(() => Promise.resolve());
   const relayToTelegramRef     = useRef<(pkg: string, amount: number) => Promise<void>>(() => Promise.resolve());
   const telegramIdRef          = useRef<string | null>(null);
+  const initialUrlProcessed    = useRef(false);
 
   const fetchBalance = useCallback(async () => {
     if (!user?.address) return;
@@ -388,7 +389,10 @@ const DashboardScreen = ({ navigation }: any) => {
     }
   }, [user?.id]);
 
-  // On mount / after login: drain anything saved to AsyncStorage while logged out
+  // On mount / after login: drain anything saved to AsyncStorage while logged out.
+  // Falls back to Linking.getInitialURL() to handle a race condition where
+  // RootNavigator hasn't finished its async getInitialURL→setItem call by the
+  // time this effect runs (happens on cold start when user is already logged in).
   useEffect(() => {
     if (!user?.id) return;
     (async () => {
@@ -405,6 +409,17 @@ const DashboardScreen = ({ navigation }: any) => {
         await supabase
           .from('linked_accounts')
           .upsert({ telegram_id: telegramId, user_id: user.id });
+      } else if (!initialUrlProcessed.current) {
+        // Fallback: read the launch URL directly in case RootNavigator lost the race
+        initialUrlProcessed.current = true;
+        const url = await Linking.getInitialURL();
+        if (!url) return;
+        const sMatch = url.match(/scrolltax:\/\/session\?id=([^&]+)/);
+        if (sMatch) {
+          const sid = sMatch[1].trim();
+          const tgM = url.match(/[?&]telegram_id=([^&]+)/);
+          await processSessionJoin(tgM ? tgM[1].trim() : null, sid);
+        }
       }
     })();
   }, [user?.id]);
