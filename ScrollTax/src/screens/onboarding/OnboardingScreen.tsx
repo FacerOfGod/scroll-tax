@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
+import Logo from '../../components/Logo';
 
 const FEATURES = [
   { icon: '💰', title: 'Stake XRP', desc: 'Lock funds into a group to commit to your goals.' },
@@ -41,13 +42,7 @@ const OnboardingScreen = ({ navigation }: any) => {
             { opacity: logoAnim.opacity, transform: [{ translateY: logoAnim.translateY }] },
           ]}
         >
-          <View style={styles.logoRing}>
-            <View style={styles.logoMark}>
-              <Text style={styles.logoMarkText}>ST</Text>
-            </View>
-          </View>
-          <Text style={styles.logoText}>ScrollTax</Text>
-          <Text style={styles.tagline}>Focus is Financial Accountability.</Text>
+          <Logo size="lg" showWordmark showTagline />
         </Animated.View>
 
         {/* Feature Rows */}
@@ -122,47 +117,6 @@ const styles = StyleSheet.create({
   logoSection: {
     alignItems: 'center',
     paddingTop: 20,
-  },
-  logoRing: {
-    width: 76,
-    height: 76,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  logoMark: {
-    width: 62,
-    height: 62,
-    borderRadius: 18,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  logoMarkText: {
-    color: '#FFF',
-    fontSize: 24,
-    fontWeight: '900',
-    letterSpacing: -0.5,
-  },
-  logoText: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: Colors.text,
-    letterSpacing: -1,
-  },
-  tagline: {
-    fontSize: 15,
-    color: Colors.textMuted,
-    marginTop: 6,
-    textAlign: 'center',
   },
   features: {
     gap: 10,

@@ -24,10 +24,11 @@ export { PENDING_TELEGRAM_KEY };
 export const PENDING_SESSION_KEY = 'pendingSessionJoin';
 
 const linking = {
-  prefixes: ['scrolltax://'],
+  prefixes: ['scrolltax://', 'https://apbjggxmtjgocafwzxza.supabase.co'],
   config: {
     screens: {
       GroupDashboard: 'join/:groupId',
+      LinkTelegram: 'link',
     },
   },
 };
@@ -44,6 +45,9 @@ const NavigationContent = () => {
     const handleUrl = (url: string) => {
       const joinMatch = url.match(/scrolltax:\/\/join\/(.+)/);
       if (joinMatch) AsyncStorage.setItem(PENDING_INVITE_KEY, joinMatch[1].trim());
+
+      const joinGroupMatch = url.match(/\/join-group\?.*group_id=([^&]+)/);
+      if (joinGroupMatch) AsyncStorage.setItem(PENDING_INVITE_KEY, joinGroupMatch[1].trim());
 
       const linkMatch = url.match(/scrolltax:\/\/link\?telegram_id=([^&]+)/);
       if (linkMatch) AsyncStorage.setItem(PENDING_TELEGRAM_KEY, linkMatch[1].trim());
@@ -66,6 +70,9 @@ const NavigationContent = () => {
     if (!user || isLoading) return;
 
     const handleUrl = (url: string) => {
+      const joinGroupMatch = url.match(/\/join-group\?.*group_id=([^&]+)/);
+      if (joinGroupMatch) AsyncStorage.setItem(PENDING_INVITE_KEY, joinGroupMatch[1].trim());
+
       const linkMatch = url.match(/scrolltax:\/\/link\?telegram_id=([^&]+)/);
       if (linkMatch) AsyncStorage.setItem(PENDING_TELEGRAM_KEY, linkMatch[1].trim());
 

@@ -16,6 +16,7 @@ import {
 import { Colors } from '../../theme/colors';
 import { useAuth } from '../../services/AuthContext';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
+import Logo from '../../components/Logo';
 
 const SignupScreen = ({ navigation }: any) => {
   const [email, setEmail] = useState('');
@@ -84,11 +85,7 @@ const SignupScreen = ({ navigation }: any) => {
               { opacity: logoAnim.opacity, transform: [{ translateY: logoAnim.translateY }] },
             ]}
           >
-            <View style={styles.logoRing}>
-              <View style={styles.logoMark}>
-                <Text style={styles.logoMarkText}>ST</Text>
-              </View>
-            </View>
+            <Logo size="md" />
           </Animated.View>
 
           <Animated.View
@@ -192,34 +189,6 @@ const styles = StyleSheet.create({
   logoSection: {
     alignItems: 'center',
     marginBottom: 32,
-  },
-  logoRing: {
-    width: 70,
-    height: 70,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoMark: {
-    width: 58,
-    height: 58,
-    borderRadius: 17,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  logoMarkText: {
-    color: '#FFF',
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: -0.5,
   },
   header: {
     marginBottom: 36,

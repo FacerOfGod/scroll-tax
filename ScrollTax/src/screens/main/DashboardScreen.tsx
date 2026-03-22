@@ -27,6 +27,7 @@ import { ScrollDetectionService } from '../../services/ScrollDetectionService';
 import * as Keychain from 'react-native-keychain';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import { PENDING_INVITE_KEY, PENDING_TELEGRAM_KEY, PENDING_SESSION_KEY } from '../../navigation/RootNavigator';
+import Logo from '../../components/Logo';
 
 // ─── Pixel Wave ───────────────────────────────────────────────────────────────
 
@@ -412,6 +413,11 @@ const DashboardScreen = ({ navigation }: any) => {
   useEffect(() => {
     if (!user?.id) return;
     const sub = Linking.addEventListener('url', ({ url }) => {
+      const linkMatch = url.match(/scrolltax:\/\/link\?telegram_id=([^&]+)/);
+      if (linkMatch) {
+        supabase.from('linked_accounts').upsert({ telegram_id: linkMatch[1].trim(), user_id: user.id });
+        return;
+      }
       const sessionMatch = url.match(/scrolltax:\/\/session\?id=([^&]+)/);
       if (!sessionMatch) return;
       const sessionId = sessionMatch[1].trim();
@@ -649,7 +655,7 @@ const DashboardScreen = ({ navigation }: any) => {
           ]}
         >
           <View>
-            <Text style={styles.appName}>ScrollTax</Text>
+            <Logo size="sm" showWordmark direction="horizontal" />
             <View style={styles.addressRow}>
               <Text style={styles.walletAddress}>{truncateAddress(user?.address || '')}</Text>
               <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.6} style={styles.copyButton}>
@@ -825,12 +831,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 24,
-  },
-  appName: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.text,
-    letterSpacing: -0.5,
   },
   addressRow: {
     flexDirection: 'row',

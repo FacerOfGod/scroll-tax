@@ -29,6 +29,7 @@ const LinkTelegramScreen = ({ route }: any) => {
           .from('linked_accounts')
           .insert({ telegram_id: telegramId, user_id: user.id })
           .then(({ error }) => {
+            if (error) console.error('[LinkTelegram] insert error:', error.message, error.code);
             setStatus(error ? 'error' : 'linked');
           });
       });

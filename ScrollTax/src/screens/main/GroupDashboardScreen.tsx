@@ -178,8 +178,9 @@ export default function GroupDashboardScreen() {
   };
 
   const handleShare = async () => {
+    const inviteUrl = `https://apbjggxmtjgocafwzxza.supabase.co/functions/v1/join-group?group_id=${groupId}`;
     await Share.share({
-      message: `Join me in "${group?.name}" on ScrollTax!\n\nscrolltax://join/${groupId}`,
+      message: `Join me in "${group?.name}" on ScrollTax!\n\n${inviteUrl}`,
     });
   };
 
