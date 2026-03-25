@@ -41,19 +41,17 @@ class GroupService {
     stakedAmount: number = 0,
   ) {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('group_members')
         .insert([{
           group_id: groupId,
           user_id: userId,
           wallet_address: walletAddress,
           staked_amount: stakedAmount,
-        }])
-        .select()
-        .single();
+        }]);
 
       if (error) throw error;
-      return { data, error: null };
+      return { data: null, error: null };
     } catch (error) {
       console.error('Error joining group:', error);
       return { data: null, error };

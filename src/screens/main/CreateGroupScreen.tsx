@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { xrplService } from '../../services/XrplService';
@@ -31,6 +32,25 @@ const CreateGroupScreen = ({ navigation }: any) => {
   const [deposit, setDeposit] = useState('10');
   const [penalty, setPenalty] = useState('0.5');
   const [duration, setDuration] = useState('7');
+  const [durationUnit, setDurationUnit] = useState<'days' | 'hours' | 'minutes'>('days');
+  const sliderAnim = useRef(new Animated.Value(2)).current;
+  const [btnWidth, setBtnWidth] = useState(0);
+
+  const getSliderTarget = (unit: 'days' | 'hours' | 'minutes', width: number) => {
+    const index = unit === 'days' ? 0 : unit === 'hours' ? 1 : 2;
+    return 2 + index * width;
+  };
+
+  const switchUnit = (unit: 'days' | 'hours' | 'minutes') => {
+    setDurationUnit(unit);
+    setDuration(unit === 'days' ? '7' : unit === 'hours' ? '24' : '30');
+    Animated.spring(sliderAnim, {
+      toValue: getSliderTarget(unit, btnWidth),
+      useNativeDriver: false,
+      speed: 10,
+      bounciness: 4,
+    }).start();
+  };
   const [selectedApps, setSelectedApps] = useState<string[]>(ALL_APPS.map(a => a.id));
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'idle' | 'sending' | 'saving'>('idle');
@@ -91,7 +111,11 @@ const CreateGroupScreen = ({ navigation }: any) => {
         creator_id: user.id,
         wallet_address: user.address,
         min_deposit: parseFloat(deposit),
-        duration_days: parseInt(duration, 10) || 7,
+        duration_days: durationUnit === 'hours'
+          ? (parseFloat(duration) || 1) / 24
+          : durationUnit === 'minutes'
+          ? (parseFloat(duration) || 1) / 1440
+          : parseInt(duration, 10) || 7,
         penalty_amount: parseFloat(penalty),
         penalty_trigger_time_minutes: 30,
         banned_apps: selectedApps,
@@ -126,9 +150,11 @@ const CreateGroupScreen = ({ navigation }: any) => {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={styles.back}>Cancel</Text>
+              <Text style={styles.back}>{'<'}</Text>
             </TouchableOpacity>
-            <Text style={styles.title}>New Group</Text>
+            <View style={styles.titleWrap} pointerEvents="none">
+              <Text style={styles.title}>New Group</Text>
+            </View>
             <View style={{ width: 56 }} />
           </View>
 
@@ -158,15 +184,42 @@ const CreateGroupScreen = ({ navigation }: any) => {
                 />
               </View>
               <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.label}>Duration (Days)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="7"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad"
-                  value={duration}
-                  onChangeText={setDuration}
-                />
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Duration</Text>
+                  <View style={styles.unitToggle}>
+                    <Animated.View style={[styles.unitSlider, { width: btnWidth, left: sliderAnim }]} />
+                    <TouchableOpacity
+                      style={styles.unitBtn}
+                      onLayout={e => {
+                        const w = e.nativeEvent.layout.width;
+                        setBtnWidth(w);
+                        sliderAnim.setValue(getSliderTarget(durationUnit, w));
+                      }}
+                      onPress={() => switchUnit('days')}
+                    >
+                      <Text style={[styles.unitBtnText, durationUnit === 'days' && styles.unitBtnTextActive]}>D</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.unitBtn} onPress={() => switchUnit('hours')}>
+                      <Text style={[styles.unitBtnText, durationUnit === 'hours' && styles.unitBtnTextActive]}>H</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.unitBtn} onPress={() => switchUnit('minutes')}>
+                      <Text style={[styles.unitBtnText, durationUnit === 'minutes' && styles.unitBtnTextActive]}>M</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={styles.inputWithSuffix}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, borderWidth: 0 }]}
+                    placeholder={durationUnit === 'days' ? '7' : durationUnit === 'hours' ? '24' : '30'}
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="number-pad"
+                    value={duration}
+                    onChangeText={setDuration}
+                  />
+                  <View style={styles.unitSuffix}>
+                    <Text style={styles.unitSuffixText}>{durationUnit === 'days' ? 'days' : durationUnit === 'hours' ? 'hours' : 'minutes'}</Text>
+                  </View>
+                </View>
               </View>
             </View>
 
@@ -250,6 +303,12 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 16,
   },
+  titleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
   title: {
     fontSize: 20,
     fontWeight: '700',
@@ -261,6 +320,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: 12,
+    alignItems: 'flex-end',
   },
   inputGroup: {
     gap: 8,
@@ -273,6 +333,62 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginLeft: 4,
   },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginRight: 4,
+  },
+  unitToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    position: 'relative',
+    padding: 2,
+  },
+  unitSlider: {
+    position: 'absolute',
+    top: 2,
+    bottom: 2,
+    backgroundColor: Colors.primary,
+    borderRadius: 6,
+  },
+  unitBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    zIndex: 1,
+  },
+  unitBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  unitBtnTextActive: {
+    color: '#FFFFFF',
+  },
+  inputWithSuffix: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    height: 56,
+    overflow: 'hidden',
+  },
+  unitSuffix: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 14,
+    gap: 4,
+  },
+  unitSuffixText: {
+    fontSize: 15,
+    color: Colors.textMuted,
+  },
   input: {
     backgroundColor: Colors.surface,
     height: 56,
@@ -284,11 +400,11 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   infoBox: {
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    backgroundColor: 'rgba(255, 83, 0, 0.08)',
     padding: 16,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.25)',
+    borderColor: 'rgba(255, 83, 0, 0.25)',
     gap: 8,
   },
   infoTitle: {
@@ -304,7 +420,7 @@ const styles = StyleSheet.create({
   addressRow: {
     marginTop: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(59, 130, 246, 0.2)',
+    borderTopColor: 'rgba(255, 83, 0, 0.2)',
     paddingTop: 8,
     gap: 4,
   },
@@ -323,7 +439,7 @@ const styles = StyleSheet.create({
   createButton: {
     backgroundColor: Colors.primary,
     height: 58,
-    borderRadius: 16,
+    borderRadius: 9999,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 8,

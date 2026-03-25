@@ -71,7 +71,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 32,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
     gap: 12,
   },
   icon: {

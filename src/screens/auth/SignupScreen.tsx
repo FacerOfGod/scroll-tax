@@ -228,17 +228,17 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.7)',
+    borderColor: 'rgba(42, 42, 42, 0.7)',
   },
   progressBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    backgroundColor: 'rgba(255, 83, 0, 0.08)',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(255, 83, 0, 0.2)',
   },
   progressText: {
     color: Colors.primary,
@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: Colors.primary,
     height: 58,
-    borderRadius: 16,
+    borderRadius: 9999,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 4,
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.5)',
+    borderColor: 'rgba(42, 42, 42, 0.5)',
   },
   infoText: {
     fontSize: 12,

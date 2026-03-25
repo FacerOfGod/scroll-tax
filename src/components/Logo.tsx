@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
   },
   ring: {
     borderWidth: 1.5,
-    borderColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(255, 83, 0, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },

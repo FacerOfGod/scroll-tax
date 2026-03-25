@@ -181,7 +181,7 @@ class ScrollDetectionService : Service() {
         lastWarningTimeMs = now
 
         val notification = NotificationCompat.Builder(this, CHANNEL_WARN)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("⚠️ ${friendlyName(pkg)} detected")
             .setContentText("Stay too long and you'll be penalized.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -196,7 +196,7 @@ class ScrollDetectionService : Service() {
 
     private fun buildMonitorNotification() =
         NotificationCompat.Builder(this, CHANNEL_MONITOR)
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("ScrollTax is active")
             .setContentText("Monitoring for banned apps…")
             .setPriority(NotificationCompat.PRIORITY_MIN)

@@ -132,9 +132,11 @@ export default function GroupsScreen() {
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.backButton}>{'< Back'}</Text>
+          <Text style={styles.backButton}>{'<'}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>My Groups</Text>
+        <View style={styles.headerTitleWrap} pointerEvents="none">
+          <Text style={styles.headerTitle}>My Groups</Text>
+        </View>
         <View style={{ width: 56 }} />
       </Animated.View>
 
@@ -200,12 +202,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(51, 65, 85, 0.5)',
+    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
   },
   backButton: {
     color: Colors.primary,
     fontSize: 16,
     fontWeight: '600',
+  },
+  headerTitleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
@@ -227,7 +235,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
@@ -251,12 +259,12 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   statusPill: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.35)',
+    borderColor: 'rgba(48, 209, 88, 0.35)',
   },
   statusPillEnded: {
     backgroundColor: 'rgba(148, 163, 184, 0.1)',
@@ -275,7 +283,7 @@ const styles = StyleSheet.create({
   cardStats: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(51, 65, 85, 0.5)',
+    borderTopColor: 'rgba(42, 42, 42, 0.5)',
     paddingVertical: 12,
     paddingHorizontal: 16,
   },
@@ -300,7 +308,7 @@ const styles = StyleSheet.create({
   },
   cardStatDivider: {
     width: 1,
-    backgroundColor: 'rgba(51, 65, 85, 0.5)',
+    backgroundColor: 'rgba(42, 42, 42, 0.5)',
     marginHorizontal: 4,
   },
   cardArrow: {

@@ -1,10 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
+  AppState,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors } from '../../theme/colors';
@@ -13,11 +14,19 @@ import { ScrollDetectionService } from '../../services/ScrollDetectionService';
 export default function DistractionSettingsScreen({ navigation }: any) {
   const [hasUsage, setHasUsage] = useState<boolean | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      ScrollDetectionService.hasUsageAccess().then(setHasUsage);
-    }, []),
-  );
+  const checkUsage = useCallback(() => {
+    ScrollDetectionService.hasUsageAccess().then(setHasUsage);
+  }, []);
+
+  useFocusEffect(useCallback(() => { checkUsage(); }, [checkUsage]));
+
+  // Re-check when the user returns from Android Settings
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') checkUsage();
+    });
+    return () => sub.remove();
+  }, [checkUsage]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -26,9 +35,11 @@ export default function DistractionSettingsScreen({ navigation }: any) {
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.back}>{'< Back'}</Text>
+          <Text style={styles.back}>{'<'}</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Tracking Settings</Text>
+        <View style={styles.titleWrap} pointerEvents="none">
+          <Text style={styles.title}>Tracking Settings</Text>
+        </View>
         <View style={{ width: 56 }} />
       </View>
 
@@ -87,6 +98,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  titleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
   title: {
     fontSize: 18,
     fontWeight: '700',
@@ -140,12 +157,12 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   badgeOn: {
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    borderColor: 'rgba(16, 185, 129, 0.4)',
+    backgroundColor: 'rgba(48, 209, 88, 0.12)',
+    borderColor: 'rgba(48, 209, 88, 0.4)',
   },
   badgeOff: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderColor: 'rgba(239, 68, 68, 0.35)',
+    backgroundColor: 'rgba(255, 69, 58, 0.1)',
+    borderColor: 'rgba(255, 69, 58, 0.35)',
   },
   badgeText: {
     fontSize: 12,
@@ -158,10 +175,10 @@ const styles = StyleSheet.create({
     color: Colors.error,
   },
   permissionButton: {
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    backgroundColor: 'rgba(255, 83, 0, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.3)',
-    borderRadius: 12,
+    borderColor: 'rgba(255, 83, 0, 0.3)',
+    borderRadius: 9999,
     padding: 13,
     alignItems: 'center',
   },

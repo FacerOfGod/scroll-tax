@@ -29,6 +29,260 @@ import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import { PENDING_INVITE_KEY, PENDING_TELEGRAM_KEY, PENDING_SESSION_KEY } from '../../navigation/RootNavigator';
 import Logo from '../../components/Logo';
 
+// ─── Animated Number ──────────────────────────────────────────────────────────
+
+function useAnimatedNumber(target: number, duration = 550) {
+  const [display, setDisplay] = useState(target);
+  const currentRef = useRef(target);
+  const rafRef     = useRef<number | null>(null);
+
+  useEffect(() => {
+    const start = currentRef.current;
+    if (Math.abs(start - target) < 0.0001) {
+      currentRef.current = target;
+      setDisplay(target);
+      return;
+    }
+    const startTime = Date.now();
+    const tick = () => {
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      const val = start + (target - start) * eased;
+      currentRef.current = val;
+      setDisplay(val);
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        currentRef.current = target;
+        setDisplay(target);
+      }
+    };
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); };
+  }, [target]);
+
+  return display;
+}
+
+function AnimatedNumber({
+  value,
+  decimals = 2,
+  style,
+  prefix = '',
+  suffix = '',
+}: {
+  value: number;
+  decimals?: number;
+  style?: any;
+  prefix?: string;
+  suffix?: string;
+}) {
+  const animated = useAnimatedNumber(value);
+  return <Text style={style}>{prefix}{animated.toFixed(decimals)}{suffix}</Text>;
+}
+
+// ─── Mini Price Chart ─────────────────────────────────────────────────────────
+
+const CURRENCY_SYMBOL: Record<string, string> = { usd: '$', eur: '€', chf: 'Fr.' };
+const CHART_H = 68;
+const CHART_PAD = 6;
+
+const MiniPriceChart = React.memo(({
+  prices,
+  change24h,
+  currentPrice,
+  currency,
+}: {
+  prices: number[];
+  change24h: number;
+  currentPrice: number;
+  currency: string;
+}) => {
+  const [chartWidth, setChartWidth] = useState(0);
+  const isUp = change24h >= 0;
+
+  const min   = prices.length ? Math.min(...prices) : 0;
+  const max   = prices.length ? Math.max(...prices) : 1;
+  const range = max - min || 1;
+
+  const getX = (i: number) =>
+    CHART_PAD + (i / Math.max(prices.length - 1, 1)) * (chartWidth - CHART_PAD * 2);
+  const getY = (p: number) =>
+    CHART_PAD + (1 - (p - min) / range) * (CHART_H - CHART_PAD * 2);
+
+  const points = chartWidth > 0 ? prices.map((p, i) => ({ x: getX(i), y: getY(p) })) : [];
+
+  return (
+    <View style={miniChartStyles.card}>
+      {/* Header */}
+      <View style={miniChartStyles.header}>
+        <View>
+          <Text style={miniChartStyles.pair}>XRP / {currency.toUpperCase()}</Text>
+          <AnimatedNumber
+            value={currentPrice}
+            decimals={4}
+            style={miniChartStyles.price}
+            prefix={CURRENCY_SYMBOL[currency] ?? ''}
+          />
+        </View>
+        <View style={[
+          miniChartStyles.badge,
+          {
+            backgroundColor: isUp ? 'rgba(48,209,88,0.12)' : 'rgba(255,69,58,0.12)',
+            borderColor:      isUp ? 'rgba(48,209,88,0.3)'  : 'rgba(255,69,58,0.3)',
+          },
+        ]}>
+          <AnimatedNumber
+            value={Math.abs(change24h)}
+            decimals={2}
+            style={[miniChartStyles.badgeText, { color: isUp ? Colors.secondary : Colors.error }]}
+            prefix={isUp ? '+' : '−'}
+            suffix="%"
+          />
+          <Text style={[miniChartStyles.badgeLabel, { color: isUp ? Colors.secondary : Colors.error }]}>
+            24h
+          </Text>
+        </View>
+      </View>
+
+      {/* Line chart */}
+      <View
+        style={{ height: CHART_H }}
+        onLayout={e => setChartWidth(e.nativeEvent.layout.width)}
+      >
+        {points.length > 1 && (
+          <>
+            {/* Area fill – thin vertical columns from point to bottom */}
+            {points.map((pt, i) => {
+              const colW = (chartWidth - CHART_PAD * 2) / (prices.length - 1);
+              return (
+                <View
+                  key={`f${i}`}
+                  style={{
+                    position: 'absolute',
+                    left: pt.x - colW / 2,
+                    top: pt.y,
+                    width: colW + 1,
+                    height: CHART_H - pt.y,
+                    backgroundColor: 'rgba(255, 83, 0, 0.07)',
+                  }}
+                />
+              );
+            })}
+
+            {/* Line segments */}
+            {points.slice(0, -1).map((pt, i) => {
+              const next = points[i + 1];
+              const dx   = next.x - pt.x;
+              const dy   = next.y - pt.y;
+              const len  = Math.sqrt(dx * dx + dy * dy);
+              const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+              return (
+                <View
+                  key={`l${i}`}
+                  style={{
+                    position: 'absolute',
+                    left: pt.x + dx / 2 - len / 2,
+                    top:  pt.y + dy / 2 - 1,
+                    width: len,
+                    height: 2,
+                    backgroundColor: Colors.primary,
+                    borderRadius: 1,
+                    transform: [{ rotate: `${angle}deg` }],
+                  }}
+                />
+              );
+            })}
+
+            {/* Current price dot */}
+            {(() => {
+              const last = points[points.length - 1];
+              return (
+                <>
+                  <View style={{
+                    position: 'absolute',
+                    left: last.x - 8,
+                    top:  last.y - 8,
+                    width: 16,
+                    height: 16,
+                    borderRadius: 8,
+                    backgroundColor: 'rgba(255, 83, 0, 0.2)',
+                  }} />
+                  <View style={{
+                    position: 'absolute',
+                    left: last.x - 4,
+                    top:  last.y - 4,
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: Colors.primary,
+                  }} />
+                </>
+              );
+            })()}
+          </>
+        )}
+      </View>
+    </View>
+  );
+});
+
+const miniChartStyles = StyleSheet.create({
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(42, 42, 42, 0.6)',
+    padding: 16,
+    marginBottom: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  pair: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  price: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: Colors.text,
+    marginTop: 3,
+    letterSpacing: -0.5,
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  badgeText: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  badgeLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 1,
+  },
+});
+
 // ─── Pixel Wave ───────────────────────────────────────────────────────────────
 
 const WAVE_COLS   = 16;
@@ -156,12 +410,19 @@ const DashboardScreen = ({ navigation }: any) => {
   const [copied, setCopied]               = useState(false);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
   const [telegramSession, setTelegramSession] = useState<TelegramSession | null>(null);
+  const [hasActiveGroup, setHasActiveGroup]   = useState(false);
+  const [usageAccessGranted, setUsageAccessGranted] = useState(true);
+  const [notifPermGranted, setNotifPermGranted]     = useState(true);
+  const [xrpPrices, setXrpPrices] = useState<{ usd: number; eur: number; chf: number } | null>(null);
+  const [currency, setCurrency]   = useState<'usd' | 'eur' | 'chf'>('usd');
+  const [chartData, setChartData] = useState<{ prices: number[]; change24h: number } | null>(null);
 
   const headerAnim  = useEntranceAnimation(0);
   const balanceAnim = useEntranceAnimation(100);
   const actionsAnim = useEntranceAnimation(200);
 
-  const balanceOpacity = useRef(new Animated.Value(1)).current;
+  const balanceOpacity  = useRef(new Animated.Value(1)).current;
+  const pulseAnim       = useRef(new Animated.Value(1)).current;
 
   const pendingPenalties       = useRef<{ appName: string; amount: number }[]>([]);
   const prevAppState           = useRef(AppState.currentState);
@@ -254,15 +515,21 @@ const DashboardScreen = ({ navigation }: any) => {
       // not the SharedPrefs default of 5 s that applies until the async DB call finishes.
       ScrollDetectionService.updateSettings({ thresholdSeconds: 30 });
 
+      // Check usage access
+      ScrollDetectionService.hasUsageAccess().then(granted => setUsageAccessGranted(granted));
+
+      // Check notification permission
       if (Platform.OS === 'android' && Platform.Version >= 33) {
-        PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-        );
+        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
+          .then(granted => setNotifPermGranted(granted));
+      } else {
+        setNotifPermGranted(true);
       }
 
       groupService.getActiveGroupForUser(user.id).then(({ data, error }) => {
         if (error) return;
         const group = (data as any)?.groups;
+        setHasActiveGroup(!!group);
         if (group?.penalty_amount) {
           activePenaltyAmountRef.current = group.penalty_amount;
         }
@@ -273,6 +540,19 @@ const DashboardScreen = ({ navigation }: any) => {
       });
     }, [user?.id]),
   );
+
+  // Pulse animation for active-group indicator
+  useEffect(() => {
+    if (!hasActiveGroup) { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,   duration: 800, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [hasActiveGroup]);
 
   // Sync banned apps to ScrollDetectionService whenever the Telegram session loads/changes
   useEffect(() => {
@@ -447,6 +727,39 @@ const DashboardScreen = ({ navigation }: any) => {
     });
     return () => sub.remove();
   }, [user?.id, processSessionJoin]);
+
+  useEffect(() => {
+    const fetchPrices = async () => {
+      try {
+        const res = await fetch(
+          'https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=usd,eur,chf',
+        );
+        const data = await res.json();
+        setXrpPrices({ usd: data.ripple.usd, eur: data.ripple.eur, chf: data.ripple.chf });
+      } catch {}
+    };
+    fetchPrices();
+    const priceInterval = setInterval(fetchPrices, 60_000);
+    return () => clearInterval(priceInterval);
+  }, []);
+
+  useEffect(() => {
+    const fetch24h = async () => {
+      try {
+        const res  = await fetch(
+          `https://api.coingecko.com/api/v3/coins/ripple/market_chart?vs_currency=${currency}&days=1`,
+        );
+        const data = await res.json();
+        const raw  = (data.prices as [number, number][]).map(([, p]) => p);
+        if (!raw.length) return;
+        const change = ((raw[raw.length - 1] - raw[0]) / raw[0]) * 100;
+        setChartData({ prices: raw.slice(-24), change24h: change });
+      } catch {}
+    };
+    fetch24h();
+    const chartInterval = setInterval(fetch24h, 60_000);
+    return () => clearInterval(chartInterval);
+  }, [currency]);
 
   useEffect(() => {
     fetchBalance();
@@ -701,9 +1014,36 @@ const DashboardScreen = ({ navigation }: any) => {
                 {balance === null ? (
                   <ActivityIndicator color={Colors.primary} style={{ marginTop: 8 }} />
                 ) : (
-                  <Text style={styles.balanceValue}>{parseFloat(balance).toFixed(2)}</Text>
+                  <>
+                    <View style={styles.balanceRow}>
+                      <AnimatedNumber value={parseFloat(balance)} decimals={2} style={styles.balanceValue} />
+                      <Text style={styles.balanceCurrencyInline}>XRP</Text>
+                    </View>
+                    {xrpPrices && (
+                      <AnimatedNumber
+                        value={parseFloat(balance) * xrpPrices[currency]}
+                        decimals={2}
+                        style={styles.fiatValue}
+                        prefix={({ usd: '$', eur: '€', chf: 'Fr.' } as Record<string, string>)[currency]}
+                        suffix={` ${currency.toUpperCase()}`}
+                      />
+                    )}
+                    <View style={styles.currencyRow}>
+                      {(['usd', 'eur', 'chf'] as const).map(c => (
+                        <TouchableOpacity
+                          key={c}
+                          onPress={() => setCurrency(c)}
+                          style={[styles.currencyChip, currency === c && styles.currencyChipActive]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                        >
+                          <Text style={[styles.currencyChipText, currency === c && styles.currencyChipTextActive]}>
+                            {c.toUpperCase()}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
                 )}
-                <Text style={styles.balanceCurrency}>XRP</Text>
               </View>
 
               <View style={styles.cardDividerV} />
@@ -711,21 +1051,29 @@ const DashboardScreen = ({ navigation }: any) => {
               {/* Right: stats */}
               <View style={styles.balanceRight}>
                 <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{penaltyCount}</Text>
+                  <AnimatedNumber value={penaltyCount} decimals={0} style={styles.statValue} />
                   <Text style={styles.statLabel}>Penalties</Text>
                 </View>
                 <View style={styles.statItemDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, penaltyCost > 0 && { color: Colors.error }]}>
-                    {penaltyCost.toFixed(2)}
-                  </Text>
+                  <AnimatedNumber
+                    value={penaltyCost}
+                    decimals={2}
+                    style={[styles.statValue, penaltyCost > 0 && { color: Colors.error }]}
+                  />
                   <Text style={styles.statLabel}>XRP Lost</Text>
                 </View>
                 <View style={styles.statItemDivider} />
                 <View style={styles.statItem}>
-                  <Text style={[styles.statValue, { color: Colors.secondary }]}>
-                    {balance !== null ? (parseFloat(balance) - penaltyCost).toFixed(2) : '—'}
-                  </Text>
+                  {balance !== null ? (
+                    <AnimatedNumber
+                      value={parseFloat(balance) - penaltyCost}
+                      decimals={2}
+                      style={styles.statValue}
+                    />
+                  ) : (
+                    <Text style={styles.statValue}>—</Text>
+                  )}
                   <Text style={styles.statLabel}>Net Balance</Text>
                 </View>
               </View>
@@ -738,23 +1086,73 @@ const DashboardScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </Animated.View>
 
+        {/* Market Chart */}
+        {chartData && xrpPrices && (
+          <Animated.View style={{ opacity: balanceAnim.opacity, transform: [{ translateY: balanceAnim.translateY }] }}>
+            <MiniPriceChart
+              prices={chartData.prices}
+              change24h={chartData.change24h}
+              currentPrice={xrpPrices[currency]}
+              currency={currency}
+            />
+          </Animated.View>
+        )}
+
+        {/* Permission warnings */}
+        {!usageAccessGranted && (
+          <TouchableOpacity
+            style={styles.permissionBox}
+            onPress={() => ScrollDetectionService.openUsageAccessSettings()}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.permissionIcon}>🔍</Text>
+            <View style={styles.permissionText}>
+              <Text style={styles.permissionTitle}>Usage Access required</Text>
+              <Text style={styles.permissionSub}>Tap to enable so ScrollTax can detect banned apps</Text>
+            </View>
+            <Text style={styles.permissionChevron}>›</Text>
+          </TouchableOpacity>
+        )}
+
+        {!notifPermGranted && (
+          <TouchableOpacity
+            style={styles.permissionBox}
+            onPress={() => {
+              if (Platform.OS === 'android' && Platform.Version >= 33) {
+                PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
+                  .then(result => setNotifPermGranted(result === PermissionsAndroid.RESULTS.GRANTED));
+              }
+            }}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.permissionIcon}>🔔</Text>
+            <View style={styles.permissionText}>
+              <Text style={styles.permissionTitle}>Notifications off</Text>
+              <Text style={styles.permissionSub}>Tap to enable penalty alerts</Text>
+            </View>
+            <Text style={styles.permissionChevron}>›</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Quick Actions */}
         <Animated.View
           style={{ opacity: actionsAnim.opacity, transform: [{ translateY: actionsAnim.translateY }] }}
         >
           <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsList}>
             <TouchableOpacity
               style={styles.actionBar}
               onPress={() => navigation.navigate('Groups')}
               activeOpacity={0.75}
             >
-              <Text style={styles.actionIcon}>👥</Text>
+              <Text style={[styles.actionIcon, { color: Colors.primary }]}>◉◉</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>My Groups</Text>
                 <Text style={styles.actionSub}>View & manage</Text>
               </View>
+              {hasActiveGroup && (
+                <Animated.View style={[styles.activeGroupDot, { opacity: pulseAnim }]} />
+              )}
               <Text style={styles.actionChevron}>›</Text>
             </TouchableOpacity>
 
@@ -765,7 +1163,7 @@ const DashboardScreen = ({ navigation }: any) => {
               onPress={() => navigation.navigate('CreateGroup')}
               activeOpacity={0.75}
             >
-              <Text style={styles.actionIcon}>➕</Text>
+              <Text style={[styles.actionIcon, { color: Colors.primary }]}>⊕</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>New Group</Text>
                 <Text style={styles.actionSub}>Start an accountability group</Text>
@@ -780,7 +1178,7 @@ const DashboardScreen = ({ navigation }: any) => {
               onPress={() => navigation.navigate('DistractionSettings')}
               activeOpacity={0.75}
             >
-              <Text style={styles.actionIcon}>⚙️</Text>
+              <Text style={[styles.actionIcon, { color: Colors.primary }]}>⚙</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>Tracking</Text>
                 <Text style={styles.actionSub}>App & threshold settings</Text>
@@ -865,7 +1263,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
   },
   copyButtonText: {
     fontSize: 10,
@@ -877,7 +1275,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.7)',
+    borderColor: 'rgba(42, 42, 42, 0.7)',
   },
   signOutText: {
     color: Colors.textMuted,
@@ -888,7 +1286,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
     marginBottom: 28,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -908,7 +1306,7 @@ const styles = StyleSheet.create({
   },
   cardDividerV: {
     width: 1,
-    backgroundColor: 'rgba(51, 65, 85, 0.5)',
+    backgroundColor: 'rgba(42, 42, 42, 0.5)',
     marginHorizontal: 20,
   },
   balanceRight: {
@@ -922,12 +1320,12 @@ const styles = StyleSheet.create({
   },
   statItemDivider: {
     height: 1,
-    backgroundColor: 'rgba(51, 65, 85, 0.4)',
+    backgroundColor: 'rgba(42, 42, 42, 0.4)',
     marginVertical: 4,
   },
   cardFooter: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(51, 65, 85, 0.4)',
+    borderTopColor: 'rgba(42, 42, 42, 0.4)',
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -953,6 +1351,49 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: -2,
   },
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+    marginTop: 4,
+  },
+  balanceCurrencyInline: {
+    fontSize: 18,
+    color: Colors.primary,
+    fontWeight: '600',
+    marginBottom: 5,
+  },
+  fiatValue: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  currencyRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 10,
+  },
+  currencyChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(42, 42, 42, 0.6)',
+  },
+  currencyChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: 'rgba(255, 83, 0, 0.12)',
+  },
+  currencyChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  currencyChipTextActive: {
+    color: Colors.primary,
+  },
   statValue: {
     fontSize: 20,
     fontWeight: '800',
@@ -968,7 +1409,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(51, 65, 85, 0.5)',
+    backgroundColor: 'rgba(42, 42, 42, 0.5)',
     marginBottom: 24,
   },
   sectionTitle: {
@@ -982,7 +1423,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
     marginBottom: 28,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -1000,7 +1441,7 @@ const styles = StyleSheet.create({
   },
   actionBarDivider: {
     height: 1,
-    backgroundColor: 'rgba(51, 65, 85, 0.4)',
+    backgroundColor: 'rgba(42, 42, 42, 0.4)',
     marginLeft: 54,
   },
   actionBarText: {
@@ -1011,6 +1452,18 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontWeight: '300',
     lineHeight: 24,
+  },
+  activeGroupDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#30D158',
+    marginRight: 8,
+    shadowColor: '#30D158',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 4,
+    elevation: 4,
   },
   actionIcon: {
     fontSize: 22,
@@ -1048,9 +1501,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   tgSessionBox: {
-    backgroundColor: 'rgba(33, 150, 243, 0.13)',
+    backgroundColor: 'rgba(255, 83, 0, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(33, 150, 243, 0.35)',
+    borderColor: 'rgba(255, 83, 0, 0.25)',
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
@@ -1068,14 +1521,14 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontWeight: '700',
-    color: '#90CAF9',
+    color: Colors.primary,
     letterSpacing: -0.1,
   },
   tgLiveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4FC3F7',
+    backgroundColor: Colors.primary,
   },
   tgSessionRow: {
     flexDirection: 'row',
@@ -1090,16 +1543,16 @@ const styles = StyleSheet.create({
   tgStatDivider: {
     width: 1,
     height: 30,
-    backgroundColor: 'rgba(33, 150, 243, 0.3)',
+    backgroundColor: 'rgba(255, 83, 0, 0.2)',
   },
   tgStatValue: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#90CAF9',
+    color: Colors.primary,
   },
   tgStatLabel: {
     fontSize: 10,
-    color: '#64B5F6',
+    color: Colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -1107,8 +1560,41 @@ const styles = StyleSheet.create({
   },
   tgSessionId: {
     fontSize: 11,
-    color: '#4FC3F7',
+    color: Colors.textMuted,
     fontFamily: 'monospace',
+    opacity: 0.7,
+  },
+  permissionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 159, 10, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 159, 10, 0.35)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    gap: 10,
+  },
+  permissionIcon: {
+    fontSize: 18,
+  },
+  permissionText: {
+    flex: 1,
+  },
+  permissionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.warning,
+  },
+  permissionSub: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  permissionChevron: {
+    fontSize: 20,
+    color: Colors.warning,
     opacity: 0.7,
   },
 });

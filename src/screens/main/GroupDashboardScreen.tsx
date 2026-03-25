@@ -238,7 +238,7 @@ export default function GroupDashboardScreen() {
           onPress={() => navigation.goBack()}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.backButton}>{'< Back'}</Text>
+          <Text style={styles.backButton}>{'<'}</Text>
         </TouchableOpacity>
         <View style={[styles.statusBadge, !isActive && styles.statusBadgeEnded]}>
           <Text style={[styles.statusBadgeText, !isActive && styles.statusBadgeTextEnded]}>
@@ -277,15 +277,6 @@ export default function GroupDashboardScreen() {
                   <Text style={styles.statUnit}>days</Text>
                 </View>
               </View>
-
-              {group.wallet_address && (
-                <View style={styles.walletBox}>
-                  <Text style={styles.walletLabel}>Treasury Wallet</Text>
-                  <Text style={styles.walletAddress} numberOfLines={1} ellipsizeMode="middle">
-                    {group.wallet_address}
-                  </Text>
-                </View>
-              )}
 
               {group.banned_apps?.length > 0 && (
                 <View style={styles.appsBox}>
@@ -386,7 +377,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(51, 65, 85, 0.5)',
+    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
   },
   backButton: {
     color: Colors.primary,
@@ -394,12 +385,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   statusBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.4)',
+    borderColor: 'rgba(48, 209, 88, 0.4)',
   },
   statusBadgeEnded: {
     backgroundColor: 'rgba(148, 163, 184, 0.15)',
@@ -437,7 +428,7 @@ const styles = StyleSheet.create({
     padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -462,11 +453,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   walletBox: {
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    backgroundColor: 'rgba(255, 83, 0, 0.08)',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(255, 83, 0, 0.2)',
     marginBottom: 16,
     gap: 4,
   },
@@ -498,7 +489,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(51, 65, 85, 0.6)',
+    borderColor: 'rgba(42, 42, 42, 0.6)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -506,8 +497,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   memberCardMe: {
-    borderColor: 'rgba(59, 130, 246, 0.4)',
-    backgroundColor: 'rgba(59, 130, 246, 0.06)',
+    borderColor: 'rgba(255, 83, 0, 0.4)',
+    backgroundColor: 'rgba(255, 83, 0, 0.06)',
   },
   memberLeft: {
     flexDirection: 'row',
@@ -551,12 +542,12 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   shareButton: {
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    padding: 18,
-    borderRadius: 16,
+    backgroundColor: 'rgba(255, 83, 0, 0.1)',
+    padding: 12,
+    borderRadius: 9999,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.4)',
+    borderColor: 'rgba(255, 83, 0, 0.4)',
   },
   shareButtonText: {
     color: Colors.primary,
@@ -565,8 +556,8 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     backgroundColor: Colors.primary,
-    padding: 18,
-    borderRadius: 16,
+    padding: 12,
+    borderRadius: 9999,
     alignItems: 'center',
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
@@ -579,9 +570,9 @@ const styles = StyleSheet.create({
     shadowColor: Colors.error,
   },
   deleteButton: {
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    backgroundColor: 'rgba(255, 69, 58, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderColor: 'rgba(255, 69, 58, 0.3)',
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -591,11 +582,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   appsBox: {
-    backgroundColor: 'rgba(16, 185, 129, 0.06)',
+    backgroundColor: 'rgba(48, 209, 88, 0.06)',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.25)',
+    borderColor: 'rgba(48, 209, 88, 0.25)',
     marginBottom: 16,
     gap: 8,
   },
@@ -615,9 +606,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 16,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(48, 209, 88, 0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: 'rgba(48, 209, 88, 0.3)',
   },
   appChipText: {
     fontSize: 13,

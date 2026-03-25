@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ScrollTax — Pitch to Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --orange: #FF5300;
+  --orange-dim: rgba(255,83,0,.12);
+  --orange-border: rgba(255,83,0,.3);
+  --bg: #000000;
+  --surface: #111111;
+  --surface2: #1a1a1a;
+  --border: #2a2a2a;
+  --text: #ffffff;
+  --text-muted: #6b6b6b;
+  --text-secondary: #949494;
+}
+
+html, body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  user-select: none;
+}
+
+/* ── SLIDE ENGINE ─────────────────────────────────────────── */
+.deck { position: relative; width: 100vw; height: 100vh; }
+
+.slide {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 48px 60px;
+  opacity: 0;
+  transform: translateX(60px);
+  transition: opacity .5s cubic-bezier(.4,0,.2,1),
+              transform .5s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.slide.active   { opacity: 1; transform: none; pointer-events: auto; }
+.slide.exit-left{ opacity: 0; transform: translateX(-60px); }
+
+/* Subtle grid background */
+.slide::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+}
+
+/* ── NAV ──────────────────────────────────────────────────── */
+.nav-btn {
+  position: fixed; top: 50%; z-index: 200;
+  transform: translateY(-50%);
+  width: 40px; height: 40px; border-radius: 9999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  color: #fff; font-size: 18px; cursor: pointer;
+  transition: background .2s, border-color .2s;
+  display: flex; align-items: center; justify-content: center;
+}
+.nav-btn:hover { background: var(--orange-dim); border-color: var(--orange-border); color: var(--orange); }
+#nav-prev { left: 16px; }
+#nav-next { right: 16px; }
+
+.slide-counter {
+  position: fixed; top: 18px; right: 22px; z-index: 200;
+  font-size: 11px; color: var(--text-muted); letter-spacing: .5px; font-weight: 500;
+}
+
+.dots {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; z-index: 200;
+}
+.dot {
+  width: 6px; height: 6px; border-radius: 9999px;
+  background: var(--border); cursor: pointer;
+  transition: all .3s;
+}
+.dot.on { background: var(--orange); width: 20px; }
+
+/* ── ANIMATIONS ───────────────────────────────────────────── */
+@keyframes fadeUp   { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:none} }
+@keyframes fadeIn   { from{opacity:0} to{opacity:1} }
+@keyframes scaleIn  { from{opacity:0;transform:scale(.88)} to{opacity:1;transform:scale(1)} }
+@keyframes slideL   { from{opacity:0;transform:translateX(-28px)} to{opacity:1;transform:none} }
+@keyframes slideR   { from{opacity:0;transform:translateX(28px)} to{opacity:1;transform:none} }
+@keyframes barRise  { from{transform:scaleY(0);transform-origin:bottom} to{transform:scaleY(1);transform-origin:bottom} }
+@keyframes pulse    { 0%,100%{opacity:1} 50%{opacity:.5} }
+@keyframes orbitGlow{ 0%,100%{box-shadow:0 0 0 0 rgba(255,83,0,0)} 50%{box-shadow:0 0 32px 4px rgba(255,83,0,.25)} }
+
+.a { opacity:0; animation-fill-mode:both; animation-duration:.55s; }
+.slide.active .a { animation-play-state:running; }
+.slide:not(.active) .a { animation-play-state:paused; opacity:0; }
+.fu { animation-name:fadeUp; }
+.fi { animation-name:fadeIn; }
+.si { animation-name:scaleIn; }
+.sl { animation-name:slideL; }
+.sr { animation-name:slideR; }
+.d1{animation-delay:.08s} .d2{animation-delay:.18s} .d3{animation-delay:.28s}
+.d4{animation-delay:.38s} .d5{animation-delay:.48s} .d6{animation-delay:.58s}
+.d7{animation-delay:.68s} .d8{animation-delay:.78s} .d9{animation-delay:.88s}
+
+/* ── SHARED ───────────────────────────────────────────────── */
+.tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 3px;
+  text-transform: uppercase; margin-bottom: 10px;
+  color: var(--orange);
+}
+.h1 { font-size: 52px; font-weight: 800; letter-spacing: -1.5px; line-height: 1.08; }
+.h2 { font-size: 38px; font-weight: 800; letter-spacing: -1px; line-height: 1.12; }
+.h3 { font-size: 26px; font-weight: 700; }
+.lead { font-size: 16px; color: var(--text-secondary); line-height: 1.75; }
+.acc  { color: var(--orange); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px; padding: 26px;
+}
+.card-l { border-left: 2px solid var(--orange); }
+
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 28px; border-radius: 9999px;
+  background: var(--orange); color: #fff;
+  font-weight: 700; font-size: 14px;
+  border: none; cursor: pointer;
+  transition: opacity .2s;
+}
+.btn-primary:hover { opacity: .85; }
+
+.btn-outline {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 28px; border-radius: 9999px;
+  background: transparent; color: #fff;
+  font-weight: 600; font-size: 14px;
+  border: 1px solid var(--border); cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+.btn-outline:hover { border-color: var(--orange); color: var(--orange); }
+
+.pill {
+  display: inline-block; padding: 4px 12px; border-radius: 9999px;
+  font-size: 11px; font-weight: 600; margin-top: 10px;
+  background: var(--orange-dim); border: 1px solid var(--orange-border);
+  color: var(--orange);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 1 — COVER
+═══════════════════════════════════════════════════════════ */
+#s1 { text-align: center; background: #000; }
+
+.logo-lockup {
+  display: flex; align-items: center; justify-content: center;
+  gap: 16px; margin-bottom: 32px;
+}
+.logo-box {
+  width: 72px; height: 72px; border-radius: 18px;
+  background: var(--orange);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 34px;
+  animation: orbitGlow 3s ease-in-out infinite;
+}
+.logo-name { font-size: 38px; font-weight: 900; letter-spacing: -1px; }
+
+.cover-tag {
+  font-size: 11px; font-weight: 600; letter-spacing: 4px; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 20px;
+}
+.cover-title {
+  font-size: 76px; font-weight: 900; letter-spacing: -3px; line-height: 1;
+  margin-bottom: 20px;
+}
+.cover-sub {
+  font-size: 20px; color: var(--text-secondary); margin-bottom: 44px;
+  font-weight: 300; max-width: 560px; margin-left: auto; margin-right: auto;
+  line-height: 1.5;
+}
+.cover-badges { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.cover-badge {
+  padding: 8px 20px; border-radius: 9999px;
+  font-size: 12px; font-weight: 600; letter-spacing: .3px;
+}
+.cb-orange { background: var(--orange-dim); border: 1px solid var(--orange-border); color: var(--orange); }
+.cb-gray   { background: rgba(255,255,255,.05); border: 1px solid var(--border); color: var(--text-secondary); }
+.cover-divider { width: 1px; background: var(--border); align-self: stretch; }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 2 — PROBLEM
+═══════════════════════════════════════════════════════════ */
+#s2 { background: #000; }
+.stats3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; width: 100%; max-width: 860px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 26px 20px; text-align: center;
+}
+.stat-n {
+  font-size: 50px; font-weight: 900; line-height: 1; margin-bottom: 10px;
+  color: var(--orange);
+}
+.stat-l { font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
+
+.bar-chart-wrap { width: 100%; max-width: 860px; }
+.bar-chart-title { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; text-align: center; letter-spacing: .5px; text-transform: uppercase; }
+.bars { display: flex; gap: 10px; align-items: flex-end; height: 100px; }
+.b-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.bar {
+  width: 100%; border-radius: 4px 4px 0 0;
+  animation: barRise .8s cubic-bezier(.4,0,.2,1) both;
+}
+.b-lab { font-size: 10px; color: var(--text-muted); text-align: center; line-height: 1.4; }
+.b-val { font-size: 11px; font-weight: 700; }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 3 — SOLUTION
+═══════════════════════════════════════════════════════════ */
+#s3 { background: #000; }
+.sol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; width: 100%; max-width: 860px; }
+.sol-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 2px solid var(--orange);
+  border-radius: 16px; padding: 24px;
+}
+.sol-icon { font-size: 28px; margin-bottom: 12px; }
+.sol-t    { font-size: 17px; font-weight: 700; margin-bottom: 7px; }
+.sol-d    { font-size: 13px; color: var(--text-secondary); line-height: 1.65; }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 4 — HOW IT WORKS
+═══════════════════════════════════════════════════════════ */
+#s4 { background: #000; }
+.flow { display: flex; align-items: flex-start; width: 100%; max-width: 940px; }
+.f-step { flex: 1; text-align: center; padding: 0 6px; }
+.f-num-badge {
+  width: 36px; height: 36px; border-radius: 9999px;
+  background: var(--orange-dim); border: 1px solid var(--orange-border);
+  color: var(--orange); font-size: 13px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 12px;
+}
+.f-t { font-size: 13px; font-weight: 700; margin-bottom: 5px; }
+.f-d { font-size: 11px; color: var(--text-muted); line-height: 1.55; }
+.f-arr { color: var(--border); font-size: 20px; flex-shrink: 0; padding: 0 2px; margin-top: 8px; }
+
+.flow-detail { display: flex; gap: 16px; width: 100%; max-width: 940px; margin-top: 24px; }
+.f-detail-card {
+  flex: 1; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px;
+}
+.f-detail-title { font-size: 12px; font-weight: 700; margin-bottom: 7px; color: var(--text-secondary); }
+.f-detail-body  { font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
+code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .9em; color: var(--orange); }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 5 — SOCIAL LAYER (was TON)
+═══════════════════════════════════════════════════════════ */
+#s5 { background: #000; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; width: 100%; max-width: 940px; align-items: start; }
+.feat-list { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.feat-li   { display: flex; align-items: flex-start; gap: 10px; font-size: 13.5px; color: rgba(255,255,255,.8); line-height: 1.55; }
+.feat-dot  {
+  width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0;
+  background: var(--orange-dim); border: 1px solid var(--orange-border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; margin-top: 1px; color: var(--orange); font-weight: 700;
+}
+.stat-row { display: flex; gap: 12px; margin-top: 20px; }
+.stat-mini {
+  flex: 1; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px; text-align: center;
+}
+.sm-n { font-size: 22px; font-weight: 800; color: var(--orange); }
+.sm-l { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* Mobile app mockup */
+.phone-mock {
+  background: var(--surface); border-radius: 24px;
+  border: 1px solid var(--border);
+  overflow: hidden; max-width: 260px; margin: 0 auto;
+}
+.phone-header {
+  background: var(--surface2); padding: 14px 16px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.phone-av {
+  width: 32px; height: 32px; border-radius: 9999px;
+  background: var(--orange); display: flex; align-items: center;
+  justify-content: center; font-size: 14px; font-weight: 800; color: #fff;
+}
+.phone-name { font-size: 13px; font-weight: 700; }
+.phone-sub  { font-size: 10px; color: var(--text-muted); }
+.phone-body { padding: 12px; display: flex; flex-direction: column; gap: 7px; }
+.p-msg { display: flex; flex-direction: column; max-width: 82%; }
+.p-msg.bot  { align-self: flex-start; }
+.p-msg.user { align-self: flex-end; }
+.p-bub {
+  padding: 8px 12px; border-radius: 12px; font-size: 11.5px; line-height: 1.55;
+}
+.bot  .p-bub { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px 12px 12px 12px; }
+.user .p-bub { background: var(--orange); color: #fff; border-radius: 12px 4px 12px 12px; }
+.p-alert {
+  background: rgba(255,83,0,.08); border: 1px solid var(--orange-border);
+  border-radius: 10px; padding: 10px 12px; font-size: 11px; line-height: 1.55; color: rgba(255,255,255,.85);
+}
+.p-tx {
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; font-size: 11px; line-height: 1.55; color: var(--text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 6 — BLOCKCHAIN LAYER (was XRPL)
+═══════════════════════════════════════════════════════════ */
+#s6 { background: #000; }
+.escrow-flow {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 22px;
+}
+.escrow-steps { display: flex; flex-direction: column; gap: 0; }
+.e-step {
+  display: flex; align-items: flex-start; gap: 12px; padding: 10px 0;
+  border-left: 2px solid var(--border); padding-left: 16px; margin-left: 8px;
+  position: relative;
+}
+.e-step::before {
+  content: ''; position: absolute; left: -5px; top: 15px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--orange);
+}
+.e-label { font-size: 10px; font-weight: 700; color: var(--orange); text-transform: uppercase; letter-spacing: 1px; }
+.e-desc  { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; line-height: 1.55; }
+
+.xrp-tracks { display: flex; flex-direction: column; gap: 9px; margin-top: 14px; }
+.xrp-track-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 13px 16px; display: flex; align-items: center; gap: 12px;
+}
+.xrp-track-icon { font-size: 20px; }
+.xrp-track-t    { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+.xrp-track-d    { font-size: 11px; color: var(--text-muted); }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 7 — TECH STACK
+═══════════════════════════════════════════════════════════ */
+#s7 { background: #000; }
+.arch {
+  width: 100%; max-width: 880px;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+}
+.arch-row { display: flex; gap: 10px; justify-content: center; width: 100%; }
+.arch-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 18px; text-align: center;
+  font-size: 12px; font-weight: 600; flex: 1; max-width: 180px;
+  color: var(--text-secondary);
+}
+.arch-box.ledger-box {
+  border-color: var(--orange-border);
+  color: var(--orange);
+  background: var(--orange-dim);
+}
+.arch-sep { font-size: 16px; color: var(--border); text-align: center; }
+.arch-label { font-size: 10px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; align-self: flex-start; width: 100%; max-width: 880px; }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 8 — MARKET
+═══════════════════════════════════════════════════════════ */
+#s8 { background: #000; }
+.market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; width: 100%; max-width: 880px; }
+.market-left { display: flex; flex-direction: column; gap: 14px; }
+.market-stat {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px;
+}
+.ms-n { font-size: 36px; font-weight: 900; color: var(--orange); line-height: 1; margin-bottom: 6px; }
+.ms-l { font-size: 12px; color: var(--text-secondary); line-height: 1.55; }
+.funnel-wrap { display: flex; flex-direction: column; gap: 7px; }
+.funnel-label { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; letter-spacing: 1.5px; text-transform: uppercase; }
+.funnel-bar {
+  height: 36px; border-radius: 8px;
+  display: flex; align-items: center; padding: 0 14px;
+  font-size: 12px; font-weight: 600;
+  background: var(--surface); border: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 9 — PARTNERSHIP MODEL
+═══════════════════════════════════════════════════════════ */
+#s9 { background: #000; }
+.rev-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; width: 100%; max-width: 880px; }
+.rev-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 24px;
+}
+.rev-icon { font-size: 28px; margin-bottom: 12px; }
+.rev-t    { font-size: 16px; font-weight: 700; margin-bottom: 7px; }
+.rev-d    { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; }
+.rev-amt  { margin-top: 12px; font-size: 20px; font-weight: 800; color: var(--orange); }
+.rev-desc { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+.moat { width: 100%; max-width: 880px; margin-top: 18px; }
+.moat-row { display: flex; gap: 10px; }
+.moat-item {
+  flex: 1; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px; font-size: 12px; color: var(--text-secondary);
+  text-align: center;
+}
+.moat-item span { display: block; font-size: 18px; margin-bottom: 5px; }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 10 — ROADMAP
+═══════════════════════════════════════════════════════════ */
+#s10 { background: #000; }
+.roadmap { display: flex; gap: 0; width: 100%; max-width: 900px; position: relative; }
+.roadmap::before {
+  content: ''; position: absolute; top: 22px; left: 10%; right: 10%; height: 2px;
+  background: linear-gradient(90deg, var(--orange), rgba(255,83,0,.3), rgba(255,83,0,.1), rgba(255,255,255,.05));
+}
+.phase { flex: 1; padding: 0 10px; text-align: center; }
+.phase-dot {
+  width: 12px; height: 12px; border-radius: 50%; margin: 16px auto 18px;
+  position: relative; z-index: 1;
+}
+.p-tag  { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 5px; color: var(--text-muted); }
+.p-t    { font-size: 14px; font-weight: 700; margin-bottom: 9px; }
+.p-list { font-size: 11.5px; color: var(--text-muted); line-height: 2; }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 11 — DEMO
+═══════════════════════════════════════════════════════════ */
+#s11 { background: #000; }
+.demo-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; width: 100%; max-width: 880px; }
+.demo-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px;
+}
+.demo-step { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 9px; color: var(--orange); }
+.demo-t    { font-size: 17px; font-weight: 700; margin-bottom: 7px; }
+.demo-d    { font-size: 12.5px; color: var(--text-secondary); line-height: 1.65; }
+.demo-screen {
+  background: #0a0a0a; border-radius: 10px; padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+  color: var(--text-secondary); line-height: 1.9; margin-top: 11px;
+  border: 1px solid var(--border);
+}
+.green-t { color: #4ade80; }
+.orange-t { color: var(--orange); }
+.gray-t  { color: var(--text-muted); }
+
+/* ═══════════════════════════════════════════════════════════
+   SLIDE 12 — CTA
+═══════════════════════════════════════════════════════════ */
+#s12 { text-align: center; background: #000; }
+.cta-logo { font-size: 56px; margin-bottom: 16px; }
+.cta-t {
+  font-size: 64px; font-weight: 900; letter-spacing: -2.5px; margin-bottom: 16px; line-height: 1;
+}
+.cta-sub { font-size: 18px; color: var(--text-secondary); margin-bottom: 36px; font-weight: 300; }
+.cta-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; max-width: 640px; margin: 0 auto 28px; }
+.cta-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 18px;
+}
+.cta-icon { font-size: 22px; margin-bottom: 7px; }
+.cta-ct   { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+.cta-cv   { font-size: 11px; color: var(--text-muted); line-height: 1.45; }
+.cta-actions { display: flex; gap: 12px; justify-content: center; }
+
+/* ═══════════════════════════════════════════════════════════
+   PRINT / PDF
+═══════════════════════════════════════════════════════════ */
+@media print {
+  html,body { overflow: visible; height: auto; }
+  .deck { height: auto; overflow: visible; }
+  .slide {
+    position: relative; opacity: 1 !important; transform: none !important;
+    pointer-events: auto; page-break-after: always;
+    height: 100vh; min-height: 100vh;
+  }
+  .nav-btn,.dots,.slide-counter { display: none; }
+  .a { opacity: 1 !important; animation: none !important; }
+  .bar { animation: none !important; }
+  .logo-box { animation: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+<!-- ═══════════════ SLIDE 1 — COVER ══════════════════════ -->
+<div class="slide active" id="s1">
+
+  <div class="a fu d1" style="margin-bottom:8px">
+    <div class="logo-lockup">
+      <div class="logo-box">📵</div>
+      <div class="logo-name">ScrollTax</div>
+    </div>
+  </div>
+
+  <p class="cover-tag a fu d2">Acquisition Proposal · Ledger × ScrollTax</p>
+  <h1 class="cover-title a fu d3">Where <span class="acc">self-custody</span><br>meets self-discipline.</h1>
+  <p class="cover-sub a fu d4">A blockchain-enforced screen time accountability app — built on XRPL, aligned with Ledger's mission of real financial sovereignty.</p>
+
+  <div class="cover-badges a fu d5">
+    <span class="cover-badge cb-orange">◈ XRPL Native</span>
+    <span class="cover-divider"></span>
+    <span class="cover-badge cb-gray">📱 Android · Live Beta</span>
+    <span class="cover-divider"></span>
+    <span class="cover-badge cb-gray">🔐 Ledger-Compatible</span>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 2 — PROBLEM ════════════════════ -->
+<div class="slide" id="s2">
+  <div style="width:100%;max-width:880px">
+    <p class="tag a fu d1">The Problem</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:8px">Crypto solved money.<br><span style="color:var(--text-secondary)">It hasn't solved attention.</span></h2>
+    <p class="lead a fu d3" style="margin-bottom:28px;font-size:15px">We gave people self-custody of their assets. Now they spend 6.5 hours a day surrendering their attention to Big Tech — for free. Financial sovereignty without behavioral sovereignty is incomplete.</p>
+
+    <div class="stats3 a fu d4" style="margin-bottom:24px">
+      <div class="stat-card">
+        <div class="stat-n">6.5h</div>
+        <div class="stat-l">Average daily screen time worldwide (2024)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-n">$223B</div>
+        <div class="stat-l">Revenue from apps engineered for compulsive use</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-n">72%</div>
+        <div class="stat-l">Of users actively want to reduce their screen time</div>
+      </div>
+    </div>
+
+    <div class="bar-chart-wrap a fu d5">
+      <div class="bar-chart-title">Daily time spent per app category (mins/day)</div>
+      <div class="bars">
+        <div class="b-wrap">
+          <div class="b-val" style="color:var(--orange)">89</div>
+          <div class="bar" style="height:89px;background:linear-gradient(180deg,#FF5300,rgba(255,83,0,.4));animation-delay:.6s"></div>
+          <div class="b-lab">TikTok</div>
+        </div>
+        <div class="b-wrap">
+          <div class="b-val" style="color:var(--orange)">53</div>
+          <div class="bar" style="height:53px;background:linear-gradient(180deg,#FF5300,rgba(255,83,0,.35));animation-delay:.7s"></div>
+          <div class="b-lab">Instagram</div>
+        </div>
+        <div class="b-wrap">
+          <div class="b-val" style="color:var(--orange)">48</div>
+          <div class="bar" style="height:48px;background:linear-gradient(180deg,#FF5300,rgba(255,83,0,.3));animation-delay:.8s"></div>
+          <div class="b-lab">YouTube</div>
+        </div>
+        <div class="b-wrap">
+          <div class="b-val" style="color:#666">38</div>
+          <div class="bar" style="height:38px;background:linear-gradient(180deg,#444,#222);animation-delay:.9s"></div>
+          <div class="b-lab">Facebook</div>
+        </div>
+        <div class="b-wrap">
+          <div class="b-val" style="color:#555">31</div>
+          <div class="bar" style="height:31px;background:linear-gradient(180deg,#333,#1a1a1a);animation-delay:1s"></div>
+          <div class="b-lab">X / Twitter</div>
+        </div>
+        <div class="b-wrap">
+          <div class="b-val" style="color:#555">25</div>
+          <div class="bar" style="height:25px;background:linear-gradient(180deg,#333,#1a1a1a);animation-delay:1.1s"></div>
+          <div class="b-lab">Telegram</div>
+        </div>
+        <div class="b-wrap">
+          <div class="b-val" style="color:#444">22</div>
+          <div class="bar" style="height:22px;background:linear-gradient(180deg,#2a2a2a,#111);animation-delay:1.2s"></div>
+          <div class="b-lab">WhatsApp</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 3 — SOLUTION ═══════════════════ -->
+<div class="slide" id="s3">
+  <div style="width:100%;max-width:880px">
+    <p class="tag a fu d1">The Solution</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:8px">Your assets. Your rules.<br>Your <span class="acc">screen time</span>.</h2>
+    <p class="lead a fu d3" style="margin-bottom:24px;font-size:15px">ScrollTax brings Ledger's philosophy — <em>your assets, your rules</em> — to behavioral accountability. Users stake real XRP; on-chain smart logic enforces their commitments. No trust required.</p>
+
+    <div class="sol-grid a fu d4">
+      <div class="sol-card">
+        <div class="sol-icon">🔐</div>
+        <div class="sol-t">Stake Real Crypto</div>
+        <div class="sol-d">Users stake XRP into a shared group treasury. Skin in the game changes behavior — because the penalty is real and on-chain.</div>
+        <span class="pill">◈ XRP · XRPL Testnet</span>
+      </div>
+      <div class="sol-card">
+        <div class="sol-icon">📵</div>
+        <div class="sol-t">Define Your Rules</div>
+        <div class="sol-d">Choose which apps are off-limits. TikTok, Instagram, YouTube — enforced at the OS level via native Android accessibility.</div>
+        <span class="pill">Kotlin AccessibilityService</span>
+      </div>
+      <div class="sol-card">
+        <div class="sol-icon">⚡</div>
+        <div class="sol-t">Auto-Penalty, On-Chain</div>
+        <div class="sol-d">Break your commitment? A penalty payment fires instantly — a real XRPL <code>Payment</code> transaction, verifiable by anyone.</div>
+        <span class="pill">Real on-chain transactions</span>
+      </div>
+      <div class="sol-card">
+        <div class="sol-icon">🏆</div>
+        <div class="sol-t">Discipline Pays Out</div>
+        <div class="sol-d">Users who stay clean split the collected penalties. Self-discipline has a literal financial return — backed by cryptographic proof.</div>
+        <span class="pill">Group treasury distribution</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 4 — HOW IT WORKS ═══════════════ -->
+<div class="slide" id="s4">
+  <div style="width:100%;max-width:940px">
+    <p class="tag a fu d1">How It Works</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:24px">Five steps to on-chain accountability</h2>
+
+    <div class="flow a fu d3">
+      <div class="f-step">
+        <div class="f-num-badge">1</div>
+        <div class="f-t">Create Group</div>
+        <div class="f-d">Host sets duration, stake amount & banned apps</div>
+      </div>
+      <div class="f-arr">›</div>
+      <div class="f-step">
+        <div class="f-num-badge">2</div>
+        <div class="f-t">Everyone Stakes</div>
+        <div class="f-d">Friends join & send XRP to group treasury wallet</div>
+      </div>
+      <div class="f-arr">›</div>
+      <div class="f-step">
+        <div class="f-num-badge">3</div>
+        <div class="f-t">Session Starts</div>
+        <div class="f-d">Android service monitors banned apps in real-time</div>
+      </div>
+      <div class="f-arr">›</div>
+      <div class="f-step">
+        <div class="f-num-badge">4</div>
+        <div class="f-t">Penalty Fires</div>
+        <div class="f-d">Violation triggers instant on-chain penalty payment</div>
+      </div>
+      <div class="f-arr">›</div>
+      <div class="f-step">
+        <div class="f-num-badge">5</div>
+        <div class="f-t">Rewards Split</div>
+        <div class="f-d">Cleanest participants share the penalty pool</div>
+      </div>
+    </div>
+
+    <div class="flow-detail a fu d5">
+      <div class="f-detail-card">
+        <div class="f-detail-title">🤖 Native Android Detection</div>
+        <div class="f-detail-body">Kotlin <code>AccessibilityService</code> hooks into Android's accessibility layer — detects app opens instantly, no root needed, no battery drain.</div>
+      </div>
+      <div class="f-detail-card">
+        <div class="f-detail-title">◈ Real XRPL Transactions</div>
+        <div class="f-detail-body">Every penalty fires a real <code>Payment</code> transaction on XRPL — verifiable on-chain. Group treasury is a real wallet address, not a database row.</div>
+      </div>
+      <div class="f-detail-card">
+        <div class="f-detail-title">🔐 Ledger Hardware Signing</div>
+        <div class="f-detail-body">Roadmap: Ledger hardware wallet signs penalty transactions. Absolute non-custodial guarantee — not even the app can move your funds.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 5 — SOCIAL LAYER ═══════════════ -->
+<div class="slide" id="s5">
+  <div style="width:100%;max-width:940px">
+    <p class="tag a fu d1">Social Layer</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:20px">Accountability is a<br><span class="acc">group sport.</span></h2>
+
+    <div class="two-col">
+      <div class="a sl d3">
+        <p class="lead" style="font-size:14px">Behavioral commitments stick when they're public. ScrollTax turns any friend group into a mutual accountability machine — with real financial consequences visible to everyone.</p>
+
+        <ul class="feat-list">
+          <li>
+            <div class="feat-dot">👥</div>
+            <span><strong>Group Sessions</strong> — Create accountability circles with friends, colleagues, or Ledger community members.</span>
+          </li>
+          <li>
+            <div class="feat-dot">📣</div>
+            <span><strong>Public Violations</strong> — When someone breaks their commitment, the group sees it instantly. Social shame + financial penalty = powerful deterrent.</span>
+          </li>
+          <li>
+            <div class="feat-dot">🏅</div>
+            <span><strong>Leaderboard</strong> — Medal rankings at session end (🥇🥈🥉). The cleanest user takes the biggest share of the pot.</span>
+          </li>
+          <li>
+            <div class="feat-dot">🔗</div>
+            <span><strong>One-tap Join</strong> — Share a link. Friends join a session without friction — XRP stake sent in one tap.</span>
+          </li>
+          <li>
+            <div class="feat-dot">📊</div>
+            <span><strong>Full Audit Trail</strong> — Every penalty on XRPL + Supabase. Immutable, public, cryptographically verified.</span>
+          </li>
+        </ul>
+
+        <div class="stat-row" style="margin-top:20px">
+          <div class="stat-mini">
+            <div class="sm-n">72%</div>
+            <div class="sm-l">Want to cut screen time</div>
+          </div>
+          <div class="stat-mini">
+            <div class="sm-n">3–5s</div>
+            <div class="sm-l">XRPL penalty finality</div>
+          </div>
+          <div class="stat-mini">
+            <div class="sm-n">$0.001</div>
+            <div class="sm-l">XRPL tx fee</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="a sr d4">
+        <div class="phone-mock">
+          <div class="phone-header">
+            <div class="phone-av">ST</div>
+            <div>
+              <div class="phone-name">ScrollTax Group</div>
+              <div class="phone-sub">4 participants · 5 XRP each</div>
+            </div>
+          </div>
+          <div class="phone-body">
+            <div class="p-msg user"><div class="p-bub">Starting 60-min session. Banned: TikTok, Instagram.</div></div>
+            <div class="p-msg bot">
+              <div class="p-bub">🚀 <strong>Session live!</strong><br>💰 Total staked: 20 XRP<br>⚡ Penalty: 0.5 XRP / violation<br>📵 Banned: TikTok, Instagram</div>
+            </div>
+            <div class="p-msg bot">
+              <div class="p-alert">⚡ <strong>VIOLATION</strong><br><br>@alex opened TikTok<br>💸 0.5 XRP → group treasury<br>🔗 Tx confirmed on XRPL</div>
+            </div>
+            <div class="p-msg bot">
+              <div class="p-tx">🏆 Session complete<br>🥇 @kenji — 0 violations → +3.2 XRP<br>🥈 @sara — 1 violation → +1.8 XRP<br>🥉 @alex — 3 violations → +0 XRP</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 6 — BLOCKCHAIN LAYER ═══════════ -->
+<div class="slide" id="s6">
+  <div style="width:100%;max-width:940px">
+    <p class="tag a fu d1">Blockchain Layer</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:20px">XRPL-native. <span class="acc">Ledger-ready.</span></h2>
+
+    <div class="two-col">
+      <div class="a sl d3">
+        <p class="lead" style="font-size:14px;margin-bottom:18px">ScrollTax runs on XRP Ledger — the same chain Ledger hardware wallets sign transactions on. Every penalty is a real, verifiable XRPL <code>Payment</code> transaction.</p>
+
+        <div class="xrp-tracks">
+          <div class="xrp-track-card">
+            <div class="xrp-track-icon">🔐</div>
+            <div>
+              <div class="xrp-track-t">Ledger Hardware Wallet — Roadmap</div>
+              <div class="xrp-track-d">Sign stake & penalty transactions via Ledger Nano / Ledger Stax. True non-custodial accountability.</div>
+            </div>
+          </div>
+          <div class="xrp-track-card">
+            <div class="xrp-track-icon">📱</div>
+            <div>
+              <div class="xrp-track-t">Ledger Live Plugin — Roadmap</div>
+              <div class="xrp-track-d">ScrollTax as a native Ledger Live app. Manage focus sessions directly from your hardware wallet dashboard.</div>
+            </div>
+          </div>
+          <div class="xrp-track-card">
+            <div class="xrp-track-icon">◈</div>
+            <div>
+              <div class="xrp-track-t">XRPL Programmability</div>
+              <div class="xrp-track-d">Programmable escrow · conditional payments · multi-party fund release. On-chain logic enforces behavior.</div>
+            </div>
+          </div>
+        </div>
+
+        <ul class="feat-list" style="margin-top:16px">
+          <li>
+            <div class="feat-dot">💎</div>
+            <span><strong>XRPL Wallet</strong> — Each user gets a wallet; seed stored securely in Android Keychain.</span>
+          </li>
+          <li>
+            <div class="feat-dot">⚡</div>
+            <span><strong>4s Settlement</strong> — XRPL's 3–5s finality means penalties hit wallets faster than guilt sets in.</span>
+          </li>
+          <li>
+            <div class="feat-dot">📊</div>
+            <span><strong>Full On-Chain Record</strong> — Every penalty on XRPL + Supabase. Full audit trail per session.</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="a sr d4">
+        <div class="escrow-flow">
+          <div style="font-size:11px;font-weight:700;margin-bottom:14px;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase">XRPL Payment Flow</div>
+          <div class="escrow-steps">
+            <div class="e-step">
+              <div>
+                <div class="e-label">Group Creation</div>
+                <div class="e-desc">Host sends <strong>stake XRP</strong> → group treasury (XRPL Payment tx). Treasury address stored on Supabase + XRPL ledger.</div>
+              </div>
+            </div>
+            <div class="e-step">
+              <div>
+                <div class="e-label">Members Join</div>
+                <div class="e-desc">Each participant sends their stake XRP via <strong>direct Payment tx</strong>. Confirmed in &lt;5s. No intermediary.</div>
+              </div>
+            </div>
+            <div class="e-step">
+              <div>
+                <div class="e-label">Violation Detected</div>
+                <div class="e-desc">AccessibilityService fires → app triggers <strong>penalty Payment</strong> from violator's wallet to treasury. Real XRP, real consequence.</div>
+              </div>
+            </div>
+            <div class="e-step">
+              <div>
+                <div class="e-label">Session End</div>
+                <div class="e-desc">Host distributes treasury to clean participants. <strong>Roadmap</strong>: Ledger Nano signs automated EscrowFinish.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#0a0a0a;border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:12px;font-family:'SF Mono','Fira Code',monospace;font-size:11px;color:var(--text-muted);line-height:1.9">
+          <span style="color:var(--text-muted);opacity:.5">// Real XRPL Payment transaction</span><br>
+          {<br>
+          &nbsp;&nbsp;<span style="color:var(--orange)">TransactionType</span>: <span style="color:#4ade80">"Payment"</span>,<br>
+          &nbsp;&nbsp;<span style="color:var(--orange)">Account</span>: <span style="color:#4ade80">"rViolator..."</span>,<br>
+          &nbsp;&nbsp;<span style="color:var(--orange)">Destination</span>: <span style="color:#4ade80">"rTreasury..."</span>,<br>
+          &nbsp;&nbsp;<span style="color:var(--orange)">Amount</span>: <span style="color:#fff">"500000"</span> <span style="color:var(--text-muted);opacity:.5">// 0.5 XRP in drops</span><br>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 7 — TECH STACK ═════════════════ -->
+<div class="slide" id="s7">
+  <div style="width:100%;max-width:900px">
+    <p class="tag a fu d1">Tech Stack</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:24px">Production-ready, <span class="acc">Ledger-compatible</span></h2>
+
+    <div class="arch a fu d3">
+      <div class="arch-label">Presentation Layer</div>
+      <div class="arch-row">
+        <div class="arch-box" style="max-width:260px;flex:2">
+          📱 React Native 0.84 + TypeScript<br><span style="font-size:10px;font-weight:400;color:var(--text-muted)">Android · React Navigation · Live Beta</span>
+        </div>
+        <div class="arch-box ledger-box">
+          🔐 Ledger Live Plugin<br><span style="font-size:10px;font-weight:400;opacity:.7">Roadmap · Q3 2026</span>
+        </div>
+      </div>
+      <div class="arch-sep">↕</div>
+
+      <div class="arch-label">Detection Layer</div>
+      <div class="arch-row">
+        <div class="arch-box" style="max-width:300px;flex:2">
+          🤖 Kotlin AccessibilityService<br><span style="font-size:10px;font-weight:400;color:var(--text-muted)">Android · Real-time app monitoring · No root</span>
+        </div>
+        <div class="arch-box">
+          🗝 Keychain<br><span style="font-size:10px;font-weight:400;color:var(--text-muted)">Wallet seed storage</span>
+        </div>
+        <div class="arch-box ledger-box">
+          🔐 Ledger Nano / Stax<br><span style="font-size:10px;font-weight:400;opacity:.7">Roadmap · TX signing</span>
+        </div>
+      </div>
+      <div class="arch-sep">↕</div>
+
+      <div class="arch-label">Blockchain Layer</div>
+      <div class="arch-row">
+        <div class="arch-box" style="max-width:280px;flex:2">
+          ◈ XRP Ledger (XRPL)<br><span style="font-size:10px;font-weight:400;color:var(--text-muted)">xrpl.js v4.6 · Payment txs · &lt;5s finality</span>
+        </div>
+      </div>
+      <div class="arch-sep">↕</div>
+
+      <div class="arch-label">Backend / Data</div>
+      <div class="arch-row">
+        <div class="arch-box" style="max-width:380px;flex:3">
+          🗄 Supabase (PostgreSQL + Auth + RLS)<br><span style="font-size:10px;font-weight:400;color:var(--text-muted)">groups · participants · sessions · penalties · linked_accounts</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 8 — MARKET ═════════════════════ -->
+<div class="slide" id="s8">
+  <div style="width:100%;max-width:880px">
+    <p class="tag a fu d1">Market Opportunity</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:24px">A <span class="acc">massive</span> problem,<br>a ready-made distribution channel.</h2>
+
+    <div class="market-grid">
+      <div class="market-left a sl d3">
+        <div class="market-stat">
+          <div class="ms-n">$9.5B</div>
+          <div class="ms-l">Global digital wellness market (2024), growing 14% CAGR. Screen time management is the fastest-growing sub-segment.</div>
+        </div>
+        <div class="market-stat">
+          <div class="ms-n">6M+</div>
+          <div class="ms-l">Ledger hardware wallet owners — crypto-native users who already trust Ledger with their assets. ScrollTax's ideal early adopters.</div>
+        </div>
+        <div class="market-stat">
+          <div class="ms-n">96×</div>
+          <div class="ms-l">Average daily phone unlocks. Each unlock is a potential ScrollTax enforcement event.</div>
+        </div>
+      </div>
+
+      <div class="a sr d4">
+        <div class="funnel-wrap">
+          <div class="funnel-label">Addressable Market (TAM → SAM → SOM)</div>
+          <div class="funnel-bar" style="width:100%;border-left:2px solid var(--orange)">
+            <span>🌍 TAM — All digital wellness users</span>
+            <span style="margin-left:auto;color:var(--orange);font-weight:800">$9.5B</span>
+          </div>
+          <div class="funnel-bar" style="width:82%;margin-left:9%">
+            <span>🔐 SAM — Crypto-native mobile users</span>
+            <span style="margin-left:auto;color:var(--text-secondary);font-weight:700">$1.2B</span>
+          </div>
+          <div class="funnel-bar" style="width:55%;margin-left:22%">
+            <span>🎯 SOM — Ledger + XRPL ecosystem</span>
+            <span style="margin-left:auto;color:var(--text-secondary);font-weight:700">$80M</span>
+          </div>
+
+          <div style="margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+            <div style="font-size:10px;font-weight:700;margin-bottom:12px;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase">Why Now</div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-secondary)">
+                <span style="color:var(--orange)">◈</span>XRPL's &lt;$0.001 tx fees make micro-penalty payments viable at scale
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-secondary)">
+                <span style="color:var(--orange)">🔐</span>Ledger's 6M+ user base is the perfect crypto-native early adopter pool
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-secondary)">
+                <span style="color:var(--orange)">📱</span>Gen Z demands real tools for digital wellbeing — gamified with real stakes
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-secondary)">
+                <span style="color:var(--orange)">🎮</span>Gamified crypto proven by StepN, Duolingo — behavioral + financial loops work
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 9 — PARTNERSHIP MODEL ══════════ -->
+<div class="slide" id="s9">
+  <div style="width:100%;max-width:880px">
+    <p class="tag a fu d1">Partnership Model</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:24px">Three paths to value<br>for <span class="acc">Ledger</span></h2>
+
+    <div class="rev-grid a fu d3">
+      <div class="rev-card" style="border-top:2px solid var(--orange)">
+        <div class="rev-icon">🤝</div>
+        <div class="rev-t">Integration</div>
+        <div class="rev-d">ScrollTax as a Ledger Live native plugin. Ledger hardware wallets sign every stake and penalty transaction. First real-world DeFi wellness app for Ledger users.</div>
+        <div class="rev-amt">Ledger Live</div>
+        <div class="rev-desc">Plugin ecosystem expansion</div>
+      </div>
+      <div class="rev-card" style="border-top:2px solid var(--orange)">
+        <div class="rev-icon">🏢</div>
+        <div class="rev-t">Acquisition</div>
+        <div class="rev-d">Full acquisition of ScrollTax IP, codebase, and team. Ledger owns the only blockchain-enforced screen time accountability product on market.</div>
+        <div class="rev-amt">Full IP</div>
+        <div class="rev-desc">Team + codebase + roadmap</div>
+      </div>
+      <div class="rev-card" style="border-top:2px solid var(--orange)">
+        <div class="rev-icon">🚀</div>
+        <div class="rev-t">Invest & Co-build</div>
+        <div class="rev-d">Strategic investment + co-development. Ledger provides hardware integration, brand, and distribution. ScrollTax brings the product and behavior-tech expertise.</div>
+        <div class="rev-amt">Strategic</div>
+        <div class="rev-desc">Joint go-to-market</div>
+      </div>
+    </div>
+
+    <div class="moat a fu d5">
+      <div style="font-size:10px;color:var(--text-muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px">Why ScrollTax fits Ledger's mission</div>
+      <div class="moat-row">
+        <div class="moat-item"><span>🔐</span>Non-custodial by design</div>
+        <div class="moat-item"><span>◈</span>XRPL-native (Ledger-compatible)</div>
+        <div class="moat-item"><span>📱</span>Reaches Gen Z crypto users</div>
+        <div class="moat-item"><span>⚡</span>Real on-chain utility</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 10 — ROADMAP ═══════════════════ -->
+<div class="slide" id="s10">
+  <div style="width:100%;max-width:900px">
+    <p class="tag a fu d1">Roadmap</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:32px">From hackathon to <span class="acc">Ledger ecosystem</span></h2>
+
+    <div class="roadmap a fu d3">
+      <div class="phase">
+        <div class="phase-dot" style="background:var(--orange);box-shadow:0 0 14px rgba(255,83,0,.6)"></div>
+        <div class="p-tag">Now · Q1 2026</div>
+        <div class="p-t">MVP Live</div>
+        <div class="p-list">
+          ✅ Android app<br>
+          ✅ XRPL penalties<br>
+          ✅ Group sessions<br>
+          ✅ Leaderboard<br>
+          ✅ Live Beta APK
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-dot" style="background:#444"></div>
+        <div class="p-tag">Q2 2026</div>
+        <div class="p-t">Scale & Polish</div>
+        <div class="p-list">
+          iOS support<br>
+          XRPL EscrowFinish<br>
+          Analytics dashboard<br>
+          Public mainnet<br>
+          100 active users
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-dot" style="background:var(--orange-border)"></div>
+        <div class="p-tag" style="color:var(--orange)">Q3 2026</div>
+        <div class="p-t" style="color:var(--orange)">Ledger Integration</div>
+        <div class="p-list">
+          <span style="color:var(--orange)">🔐 Ledger Live Plugin</span><br>
+          <span style="color:var(--orange)">🔐 Ledger Nano signing</span><br>
+          Pro subscription<br>
+          Platform fee (2%)<br>
+          B2B pilot
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-dot" style="background:#333"></div>
+        <div class="p-tag">Q4 2026</div>
+        <div class="p-t">Ecosystem</div>
+        <div class="p-list">
+          Enterprise contracts<br>
+          AI-powered insights<br>
+          Multi-chain support<br>
+          DAO governance<br>
+          10K active users
+        </div>
+      </div>
+    </div>
+
+    <div class="a fu d5" style="width:100%;max-width:900px;margin-top:24px;display:flex;gap:14px">
+      <div style="flex:1;background:var(--surface);border:1px solid var(--orange-border);border-radius:12px;padding:16px">
+        <div style="font-size:11px;font-weight:700;margin-bottom:8px;color:var(--orange)">🎯 Near-term Milestones</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.9">
+          100 beta users by end of April 2026<br>
+          First real-money session with 5+ participants<br>
+          Ledger integration talks commenced
+        </div>
+      </div>
+      <div style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+        <div style="font-size:11px;font-weight:700;margin-bottom:8px;color:var(--text-secondary)">📊 Success Metrics</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.9">
+          Sessions created / day<br>
+          % users returning for 2nd session<br>
+          On-chain penalty volume (TVL)<br>
+          D7 / D30 retention rate
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 11 — LIVE DEMO ═════════════════ -->
+<div class="slide" id="s11">
+  <div style="width:100%;max-width:880px">
+    <p class="tag a fu d1">Live Demo</p>
+    <h2 class="h2 a fu d2" style="margin-bottom:20px">See it in action — <span class="acc">on-chain, right now</span></h2>
+
+    <div class="demo-grid">
+      <div class="demo-card a sl d3">
+        <div class="demo-step">Step 1 · Mobile App</div>
+        <div class="demo-t">Create a Focus Group</div>
+        <div class="demo-d">Launch ScrollTax on Android, sign up, fund your XRPL testnet wallet, create a group and stake XRP.</div>
+        <div class="demo-screen">
+          <span class="green-t">✓</span> XRPL wallet funded<br>
+          <span class="green-t">✓</span> Group created<br>
+          <span class="orange-t">→</span> Treasury: rN7n…4xKP<br>
+          <span class="orange-t">⚡</span> Staked: 5 XRP
+        </div>
+      </div>
+      <div class="demo-card a sr d3">
+        <div class="demo-step">Step 2 · Join Flow</div>
+        <div class="demo-t">Friends Stake & Join</div>
+        <div class="demo-d">Share group link. Friends open the app, send their XRP stake to the group treasury in one tap.</div>
+        <div class="demo-screen">
+          <span class="green-t">✓</span> 4 participants joined<br>
+          <span class="orange-t">→</span> Total staked: 20 XRP<br>
+          <span class="orange-t">⚡</span> All txs confirmed on XRPL<br>
+          <span class="green-t">▶</span> Session active (58 min)
+        </div>
+      </div>
+      <div class="demo-card a sl d4">
+        <div class="demo-step">Step 3 · Violation</div>
+        <div class="demo-t">Open TikTok → Pay Penalty</div>
+        <div class="demo-d">AccessibilityService detects TikTok. Penalty fires instantly — real XRP sent to group treasury, group notified.</div>
+        <div class="demo-screen">
+          <span style="color:#ef4444">⚡</span> TikTok detected<br>
+          <span class="orange-t">→</span> Penalty tx broadcast<br>
+          <span class="orange-t">⚡</span> 0.5 XRP transferred<br>
+          <span class="green-t">✓</span> On-chain confirmed
+        </div>
+      </div>
+      <div class="demo-card a sr d4">
+        <div class="demo-step">Step 4 · Session End</div>
+        <div class="demo-t">Leaderboard & Rewards</div>
+        <div class="demo-d">Session ends. Medal leaderboard shows clean users. Treasury distributed to winners. Full audit trail on XRPL.</div>
+        <div class="demo-screen">
+          <span style="color:#fbbf24">🥇</span> @kenji — 0 violations<br>
+          <span style="color:#94a3b8">🥈</span> @sara — 1 violation<br>
+          <span style="color:#b45309">🥉</span> @tom — 3 violations<br>
+          <span class="green-t">✓</span> Rewards distributed
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SLIDE 12 — CTA ═══════════════════════ -->
+<div class="slide" id="s12">
+
+  <div class="cta-logo a si d1">📵</div>
+  <h1 class="cta-t a fu d2">Let's build the<br><span class="acc">future together.</span></h1>
+  <p class="cta-sub a fu d3">ScrollTax is the first on-chain behavioral accountability app — built on XRPL, ready for Ledger.</p>
+
+  <div class="cta-grid a fu d4">
+    <div class="cta-card">
+      <div class="cta-icon">📱</div>
+      <div class="cta-ct">Live APK</div>
+      <div class="cta-cv">Android beta available<br>github.com/FacerOfGod/scroll-tax</div>
+    </div>
+    <div class="cta-card" style="border-color:var(--orange-border)">
+      <div class="cta-icon">◈</div>
+      <div class="cta-ct" style="color:var(--orange)">On-Chain</div>
+      <div class="cta-cv">Verified on XRPL Testnet<br>Every penalty is real</div>
+    </div>
+    <div class="cta-card">
+      <div class="cta-icon">🔐</div>
+      <div class="cta-ct">Ledger-Ready</div>
+      <div class="cta-cv">XRPL-native · hardware wallet<br>integration on roadmap</div>
+    </div>
+  </div>
+
+  <div class="cta-actions a fu d5">
+    <button class="btn-primary">🤝 Partner With Us</button>
+    <button class="btn-outline">📱 Try the Demo</button>
+  </div>
+
+  <p class="a fi d7" style="margin-top:24px;font-size:11px;color:var(--text-muted)">
+    github.com/FacerOfGod/scroll-tax · March 2026
+  </p>
+</div>
+
+</div><!-- /deck -->
+
+<!-- ── CONTROLS ──────────────────────────────────────────── -->
+<button class="nav-btn" id="nav-prev">‹</button>
+<button class="nav-btn" id="nav-next">›</button>
+<div class="slide-counter" id="counter">1 / 12</div>
+<div class="dots" id="dots"></div>
+
+<script>
+// ── Slide Engine ──────────────────────────────────────────
+const slides = Array.from(document.querySelectorAll('.slide'));
+const total  = slides.length;
+let cur      = 0;
+let transitioning = false;
+
+function buildDots() {
+  const d = document.getElementById('dots');
+  for (let i = 0; i < total; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'dot' + (i === 0 ? ' on' : '');
+    dot.addEventListener('click', () => goTo(i));
+    d.appendChild(dot);
+  }
+}
+buildDots();
+
+function updateDots() {
+  document.querySelectorAll('.dot').forEach((d,i) => d.classList.toggle('on', i === cur));
+  document.getElementById('counter').textContent = `${cur+1} / ${total}`;
+}
+
+function goTo(n) {
+  if (transitioning || n === cur || n < 0 || n >= total) return;
+  transitioning = true;
+
+  const prev = slides[cur];
+  const next = slides[n];
+
+  prev.classList.add('exit-left');
+  prev.classList.remove('active');
+
+  // Reset animations on next slide
+  next.querySelectorAll('.a').forEach(el => {
+    el.style.animation = 'none';
+    el.offsetHeight; // reflow
+    el.style.animation = '';
+  });
+
+  // Reset bar heights so they animate again
+  next.querySelectorAll('.bar').forEach(b => {
+    b.style.transformOrigin = 'bottom';
+  });
+
+  next.classList.add('active');
+  cur = n;
+  updateDots();
+
+  setTimeout(() => {
+    prev.classList.remove('exit-left');
+    transitioning = false;
+  }, 550);
+}
+
+function nextSlide() { goTo(cur + 1); }
+function prevSlide() { goTo(cur - 1); }
+
+document.getElementById('nav-prev').addEventListener('click', prevSlide);
+document.getElementById('nav-next').addEventListener('click', nextSlide);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
+  if (e.key === 'ArrowLeft'  || e.key === 'PageUp')  { e.preventDefault(); prevSlide(); }
+});
+
+// Touch / swipe
+let tx = 0;
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+document.addEventListener('touchend',   e => {
+  const dx = e.changedTouches[0].clientX - tx;
+  if (Math.abs(dx) > 50) dx < 0 ? nextSlide() : prevSlide();
+});
+</script>
+</body>
+</html>
