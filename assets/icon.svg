@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#1a0800"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <filter id="orangeGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background: pure black with subtle warm center -->
+  <rect width="1024" height="1024" fill="#000000"/>
+  <rect width="1024" height="1024" fill="url(#bgGrad)" opacity="0.9"/>
+
+  <!-- "ST" monogram: S=white, T=orange, matching the wordmark -->
+  <text
+    x="512"
+    y="706"
+    text-anchor="middle"
+    font-family="'Arial Black', 'Helvetica Neue', Impact, sans-serif"
+    font-weight="900"
+    font-size="540"
+    letter-spacing="-10"
+  ><tspan fill="#FFFFFF">S</tspan><tspan fill="#FF5300" filter="url(#orangeGlow)">T</tspan></text>
+
+  <!-- Orange accent line — echoes the brand's horizontal rhythm -->
+  <rect x="312" y="800" width="400" height="6" rx="3" fill="#FF5300" opacity="0.35"/>
+
+  <!-- The "." from ScrollTax. — small orange dot, top-right -->
+  <circle cx="900" cy="200" r="22" fill="#FF5300" opacity="0.4"/>
+</svg>

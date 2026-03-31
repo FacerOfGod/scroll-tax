@@ -27,6 +27,23 @@ const config = {
       events: require.resolve('events'),
       url: require.resolve('react-native-url-polyfill'),
     },
+    // @ledgerhq/devices uses package `exports` subpaths (e.g. ./* → ./lib/*.js)
+    // which Metro can't resolve when unstable_enablePackageExports is false.
+    // Intercept any @ledgerhq/devices/<subpath> import and redirect it to lib/.
+    resolveRequest: (context, moduleName, platform) => {
+      if (
+        moduleName.startsWith('@ledgerhq/devices/') &&
+        !moduleName.startsWith('@ledgerhq/devices/lib/')
+      ) {
+        const subpath = moduleName.slice('@ledgerhq/devices/'.length);
+        return context.resolveRequest(
+          context,
+          `@ledgerhq/devices/lib/${subpath}`,
+          platform,
+        );
+      }
+      return context.resolveRequest(context, moduleName, platform);
+    },
   },
 };
 

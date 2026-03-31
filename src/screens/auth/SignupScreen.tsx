@@ -69,6 +69,9 @@ const SignupScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+        <Text style={styles.backArrow}>‹</Text>
+      </TouchableOpacity>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
@@ -279,6 +282,27 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     lineHeight: 18,
     textAlign: 'center',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(42, 42, 42, 0.6)',
+  },
+  backArrow: {
+    fontSize: 32,
+    color: Colors.text,
+    fontWeight: '200',
+    lineHeight: 36,
+    marginTop: -2,
   },
   footer: {
     flexDirection: 'row',

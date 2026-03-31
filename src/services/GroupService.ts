@@ -9,6 +9,7 @@ export interface GroupDetails {
   penalty_amount: number;
   penalty_trigger_time_minutes: number;
   banned_apps: string[];
+  stake_type: 'xrp' | 'tokens';
 }
 
 class GroupService {
@@ -147,6 +148,14 @@ class GroupService {
     }
   }
 
+  async getGroupMemberIds(groupId: string): Promise<string[]> {
+    const { data } = await supabase
+      .from('group_members')
+      .select('user_id')
+      .eq('group_id', groupId);
+    return (data ?? []).map((m: any) => m.user_id as string);
+  }
+
   async deleteGroup(groupId: string) {
     try {
       const { data, error } = await supabase
@@ -188,7 +197,7 @@ class GroupService {
         .from('group_members')
         .select(`
           group_id,
-          groups (id, wallet_address, penalty_amount, name, banned_apps, penalty_trigger_time_minutes, status)
+          groups (id, wallet_address, penalty_amount, name, banned_apps, penalty_trigger_time_minutes, status, stake_type)
         `)
         .eq('user_id', userId);
 

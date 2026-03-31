@@ -4,4 +4,5 @@ export type MainStackParamList = {
   GroupDashboard: { groupId: string };
   CreateGroup: undefined;
   DistractionSettings: undefined;
+  CryptoGuide: undefined;
 };

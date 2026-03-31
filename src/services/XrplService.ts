@@ -11,13 +11,13 @@ const TESTNET_URL = 'wss://s.altnet.rippletest.net:51233';
 const RIPPLE_EPOCH_OFFSET = 946684800;
 
 class XrplService {
-  private client: Client;
+  client: Client;
 
   constructor() {
     this.client = new Client(TESTNET_URL);
   }
 
-  private async ensureConnected() {
+  async ensureConnected() {
     if (!this.client.isConnected()) {
       await this.client.connect();
     }

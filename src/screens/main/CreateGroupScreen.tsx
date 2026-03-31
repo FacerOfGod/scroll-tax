@@ -51,6 +51,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
       bounciness: 4,
     }).start();
   };
+  const [stakeType, setStakeType] = useState<'xrp' | 'tokens'>('xrp');
   const [selectedApps, setSelectedApps] = useState<string[]>(ALL_APPS.map(a => a.id));
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'idle' | 'sending' | 'saving'>('idle');
@@ -93,15 +94,16 @@ const CreateGroupScreen = ({ navigation }: any) => {
 
       const seed = credentials.password;
 
-      // Send the deposit to the creator's own wallet (self-transfer marks the stake)
-      // In a production app this would go to a multisig escrow wallet.
-      // For testnet: creator's wallet IS the group treasury.
-      try {
-        await xrplService.sendXrp(seed, user.address, deposit);
-      } catch (xrplError: any) {
-        // On testnet a self-transfer may be rejected by some nodes.
-        // Log and continue — the Supabase record is the source of truth for the demo.
-        console.warn('XRPL self-transfer note:', xrplError?.message);
+      // For XRP groups: send a self-transfer to mark the initial stake on testnet.
+      // For token groups: no on-chain transaction needed.
+      if (stakeType === 'xrp') {
+        try {
+          await xrplService.sendXrp(seed, user.address, deposit);
+        } catch (xrplError: any) {
+          // On testnet a self-transfer may be rejected by some nodes.
+          // Log and continue — the Supabase record is the source of truth for the demo.
+          console.warn('XRPL self-transfer note:', xrplError?.message);
+        }
       }
 
       setStep('saving');
@@ -119,6 +121,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
         penalty_amount: parseFloat(penalty),
         penalty_trigger_time_minutes: 30,
         banned_apps: selectedApps,
+        stake_type: stakeType,
       });
 
       if (error || !data?.id) {
@@ -171,9 +174,27 @@ const CreateGroupScreen = ({ navigation }: any) => {
               />
             </View>
 
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Stake Currency</Text>
+              <View style={styles.stakeTypeRow}>
+                {(['xrp', 'tokens'] as const).map(type => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[styles.stakeTypeBtn, stakeType === type && styles.stakeTypeBtnActive]}
+                    onPress={() => setStakeType(type)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.stakeTypeBtnText, stakeType === type && styles.stakeTypeBtnTextActive]}>
+                      {type === 'xrp' ? '⬡  XRP' : '◈  Tokens'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
             <View style={styles.row}>
               <View style={[styles.inputGroup, { flex: 1 }]}>
-                <Text style={styles.label}>Min Deposit (XRP)</Text>
+                <Text style={styles.label}>Min Deposit ({stakeType === 'xrp' ? 'XRP' : 'Tokens'})</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="10"
@@ -224,7 +245,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Penalty (XRP)</Text>
+              <Text style={styles.label}>Penalty ({stakeType === 'xrp' ? 'XRP' : 'Tokens'})</Text>
               <TextInput
                 style={styles.input}
                 placeholder="0.5"
@@ -456,6 +477,32 @@ const styles = StyleSheet.create({
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  stakeTypeRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  stakeTypeBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stakeTypeBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  stakeTypeBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textMuted,
+  },
+  stakeTypeBtnTextActive: {
+    color: '#FFFFFF',
   },
   appsGrid: {
     flexDirection: 'row',

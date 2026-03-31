@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { groupService } from '../../services/GroupService';
 import { xrplService } from '../../services/XrplService';
+import { tokenService } from '../../services/TokenService';
 import { Colors } from '../../theme/colors';
 import { useAuth } from '../../services/AuthContext';
 import { RouteProp, useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -71,64 +72,106 @@ export default function GroupDashboardScreen() {
   const isCreator = user?.id === group?.creator_id;
 
   const handleJoin = async () => {
-    if (!user?.address) {
-      Alert.alert('Wallet Error', 'No XRPL wallet found.');
-      return;
-    }
-    if (!group?.wallet_address) {
-      Alert.alert('Group Error', 'This group does not have an XRPL wallet address configured.');
-      return;
-    }
+    const depositAmount = String(group.min_deposit);
+    const isTokenGroup = group?.stake_type === 'tokens';
 
-    setJoiningLoading(true);
-    try {
-      const credentials = await Keychain.getGenericPassword({ service: `xrpl-${user.id}` });
-
-      if (!credentials) {
-        Alert.alert('Wallet Error', 'Could not retrieve your wallet. Please sign out and back in.');
-        setJoiningLoading(false);
+    if (!isTokenGroup) {
+      // ── XRP staking path ──────────────────────────────────────────────────
+      if (!user?.address) {
+        Alert.alert('Wallet Error', 'No XRPL wallet found.');
+        return;
+      }
+      if (!group?.wallet_address) {
+        Alert.alert('Group Error', 'This group does not have an XRPL wallet address configured.');
         return;
       }
 
-      const seed = credentials.password;
-      const depositAmount = String(group.min_deposit);
+      setJoiningLoading(true);
+      try {
+        const credentials = await Keychain.getGenericPassword({ service: `xrpl-${user.id}` });
+        if (!credentials) {
+          Alert.alert('Wallet Error', 'Could not retrieve your wallet. Please sign out and back in.');
+          setJoiningLoading(false);
+          return;
+        }
 
-      Alert.alert(
-        'Confirm Stake',
-        `Send ${depositAmount} XRP to join "${group.name}" on XRPL Testnet?`,
-        [
-          { text: 'Cancel', style: 'cancel', onPress: () => setJoiningLoading(false) },
-          {
-            text: 'Stake XRP',
-            onPress: async () => {
-              try {
-                await xrplService.sendXrp(seed, group.wallet_address, depositAmount);
+        const seed = credentials.password;
 
-                const { error } = await groupService.joinGroup(
-                  groupId,
-                  user.id,
-                  user.address || null,
-                  parseFloat(depositAmount),
-                );
-
-                if (error) {
-                  Alert.alert('Error', (error as Error).message);
-                } else {
-                  Alert.alert('Joined!', `You've staked ${depositAmount} XRP. Welcome to "${group.name}".`);
-                  loadGroupDetails();
+        Alert.alert(
+          'Confirm Stake',
+          `Send ${depositAmount} XRP to join "${group.name}" on XRPL Testnet?`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => setJoiningLoading(false) },
+            {
+              text: 'Stake XRP',
+              onPress: async () => {
+                try {
+                  await xrplService.sendXrp(seed, group.wallet_address, depositAmount);
+                  const { error } = await groupService.joinGroup(groupId, user.id, user.address || null, parseFloat(depositAmount));
+                  if (error) {
+                    Alert.alert('Error', (error as Error).message);
+                  } else {
+                    Alert.alert('Joined!', `You've staked ${depositAmount} XRP. Welcome to "${group.name}".`);
+                    loadGroupDetails();
+                  }
+                } catch (xrplError: any) {
+                  Alert.alert('Transaction Failed', xrplError?.message || 'Could not send XRP.');
+                } finally {
+                  setJoiningLoading(false);
                 }
-              } catch (xrplError: any) {
-                Alert.alert('Transaction Failed', xrplError?.message || 'Could not send XRP.');
-              } finally {
-                setJoiningLoading(false);
-              }
+              },
             },
-          },
-        ],
-      );
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Something went wrong.');
-      setJoiningLoading(false);
+          ],
+        );
+      } catch (e: any) {
+        Alert.alert('Error', e?.message || 'Something went wrong.');
+        setJoiningLoading(false);
+      }
+    } else {
+      // ── Token staking path ────────────────────────────────────────────────
+      setJoiningLoading(true);
+      try {
+        const balance = await tokenService.getBalance(user!.id);
+        const required = parseFloat(depositAmount);
+
+        if (balance < required) {
+          Alert.alert('Insufficient Tokens', `You have ${balance} tokens but need ${required}.`);
+          setJoiningLoading(false);
+          return;
+        }
+
+        Alert.alert(
+          'Confirm Stake',
+          `Spend ${depositAmount} Tokens to join "${group.name}"?`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => setJoiningLoading(false) },
+            {
+              text: 'Stake Tokens',
+              onPress: async () => {
+                try {
+                  await tokenService.deductTokens(user!.id, required);
+                  const { error } = await groupService.joinGroup(groupId, user!.id, user?.address || null, required);
+                  if (error) {
+                    // Refund tokens if DB write failed
+                    await tokenService.addTokens(user!.id, required);
+                    Alert.alert('Error', (error as Error).message);
+                  } else {
+                    Alert.alert('Joined!', `You've staked ${depositAmount} Tokens. Welcome to "${group.name}".`);
+                    loadGroupDetails();
+                  }
+                } catch (tokenError: any) {
+                  Alert.alert('Failed', tokenError?.message || 'Could not stake tokens.');
+                } finally {
+                  setJoiningLoading(false);
+                }
+              },
+            },
+          ],
+        );
+      } catch (e: any) {
+        Alert.alert('Error', e?.message || 'Something went wrong.');
+        setJoiningLoading(false);
+      }
     }
   };
 
@@ -215,9 +258,9 @@ export default function GroupDashboardScreen() {
           </View>
         </View>
         <View style={styles.memberStats}>
-          <Text style={styles.stakedText}>{item.staked_amount ?? 0} XRP staked</Text>
+          <Text style={styles.stakedText}>{item.staked_amount ?? 0} {group.stake_type === 'tokens' ? 'Tokens' : 'XRP'} staked</Text>
           {(item.penalties_incurred ?? 0) > 0 && (
-            <Text style={styles.penaltyText}>−{item.penalties_incurred} XRP penalties</Text>
+            <Text style={styles.penaltyText}>−{item.penalties_incurred} {group.stake_type === 'tokens' ? 'Tokens' : 'XRP'} penalties</Text>
           )}
         </View>
       </View>
@@ -264,12 +307,12 @@ export default function GroupDashboardScreen() {
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{group.min_deposit}</Text>
                   <Text style={styles.statLabel}>Min Deposit</Text>
-                  <Text style={styles.statUnit}>XRP</Text>
+                  <Text style={styles.statUnit}>{group.stake_type === 'tokens' ? 'Tokens' : 'XRP'}</Text>
                 </View>
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{group.penalty_amount}</Text>
                   <Text style={styles.statLabel}>Per Penalty</Text>
-                  <Text style={styles.statUnit}>XRP</Text>
+                  <Text style={styles.statUnit}>{group.stake_type === 'tokens' ? 'Tokens' : 'XRP'}</Text>
                 </View>
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{group.duration_days}</Text>
@@ -327,7 +370,7 @@ export default function GroupDashboardScreen() {
                     <ActivityIndicator color="#FFF" />
                   ) : (
                     <Text style={styles.actionButtonText}>
-                      Stake {group.min_deposit} XRP & Join
+                      Stake {group.min_deposit} {group.stake_type === 'tokens' ? 'Tokens' : 'XRP'} & Join
                     </Text>
                   )}
                 </TouchableOpacity>

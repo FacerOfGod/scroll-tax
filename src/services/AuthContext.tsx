@@ -1,7 +1,9 @@
 import React, {createContext, useContext, useState, useEffect} from 'react';
+import {Linking} from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {xrplService} from '../services/XrplService';
+import {tokenService} from '../services/TokenService';
 import {supabase} from './supabaseClient';
 import {Session} from '@supabase/supabase-js';
 
@@ -9,6 +11,7 @@ interface User {
   id: string;
   email?: string;
   address?: string;
+  tokens?: number;
 }
 
 interface AuthContextType {
@@ -16,62 +19,108 @@ interface AuthContextType {
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{error: any}>;
   signUp: (email: string, password: string) => Promise<{error: any, data?: any}>;
+  signInWithGoogle: () => Promise<{error: any}>;
   signOut: () => Promise<void>;
+  refreshTokenBalance: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const ensureXrplWallet = async (userId: string) => {
+  const existing = await Keychain.getGenericPassword({service: `xrpl-${userId}`});
+  if (!existing) {
+    const wallet = xrplService.generateWallet();
+    try {
+      if (wallet.seed) await xrplService.fundTestnetWallet(wallet.seed);
+    } catch (e) {
+      console.warn('Could not auto-fund wallet:', e);
+    }
+    await Keychain.setGenericPassword(wallet.address, wallet.seed!, {
+      service: `xrpl-${userId}`,
+    });
+    await supabase.auth.updateUser({data: {address: wallet.address}});
+  }
+  // Ensure token profile exists (idempotent — no-ops if already present)
+  await tokenService.ensureProfile(userId);
+};
 
 export const AuthProvider: React.FC<{children: React.ReactNode}> = ({children}) => {
   const [user, setUser] = useState<User | null>(null);
   const [, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const loadUser = (supabaseUser: any) => {
+    // Set user immediately (no async wait) so the loading screen is dismissed quickly
+    setUser({
+      id: supabaseUser.id,
+      email: supabaseUser.email,
+      address: supabaseUser.user_metadata?.address,
+    });
+    // Load token balance in the background and patch it in once available
+    tokenService.getBalance(supabaseUser.id).then(tokens => {
+      setUser(prev => (prev?.id === supabaseUser.id ? {...prev, tokens} : prev));
+    }).catch(() => {});
+  };
+
   useEffect(() => {
-    // Check for initial session
+    // Identical shape to original — no async, setIsLoading(false) always called
     supabase.auth.getSession().then(({data: {session}}) => {
       setSession(session);
       if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          address: session.user.user_metadata?.address,
-        });
+        loadUser(session.user);
       }
       setIsLoading(false);
     });
 
-    // Listen for auth changes
-    const {data: {subscription}} = supabase.auth.onAuthStateChange((_event, session) => {
+    const {data: {subscription}} = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
       if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          address: session.user.user_metadata?.address,
-        });
+        loadUser(session.user);
+        // Create XRPL wallet + token profile for new Google OAuth users on first sign-in
+        if (event === 'SIGNED_IN' && !session.user.user_metadata?.address) {
+          await ensureXrplWallet(session.user.id);
+          // Reload with updated address and wallet
+          loadUser(session.user);
+        }
       } else {
         setUser(null);
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const signIn = async (email: string, password: string) => {
-    const {data, error} = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    // Handle OAuth redirect when app is already open
+    const linkingSub = Linking.addEventListener('url', ({url}) => {
+      if (url.startsWith('scrolltax://')) {
+        supabase.auth.exchangeCodeForSession(url).catch(console.warn);
+      }
     });
 
-    // If login succeeded, check the wallet seed is still in Keychain.
-    // It can go missing if the user previously signed out (which used to wipe it)
-    // or if the app was uninstalled and reinstalled.
+    // Handle OAuth redirect when app was launched cold via deep link
+    Linking.getInitialURL().then(url => {
+      if (url?.startsWith('scrolltax://')) {
+        supabase.auth.exchangeCodeForSession(url).catch(console.warn);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      linkingSub.remove();
+    };
+  }, []);
+
+  const refreshTokenBalance = async () => {
+    if (!user) return;
+    const tokens = await tokenService.getBalance(user.id);
+    setUser(prev => prev ? {...prev, tokens} : prev);
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const {data, error} = await supabase.auth.signInWithPassword({email, password});
+
     if (!error && data.user) {
       const existing = await Keychain.getGenericPassword({
         service: `xrpl-${data.user.id}`,
       });
       if (!existing) {
-        // Seed is gone — generate a fresh wallet and update the address on the account
         const wallet = xrplService.generateWallet();
         try {
           if (wallet.seed) await xrplService.fundTestnetWallet(wallet.seed);
@@ -83,55 +132,66 @@ export const AuthProvider: React.FC<{children: React.ReactNode}> = ({children}) 
         });
         await supabase.auth.updateUser({data: {address: wallet.address}});
       }
+      // Ensure token profile exists for existing users logging in for the first time
+      await tokenService.ensureProfile(data.user.id);
     }
 
     return {error};
   };
 
   const signUp = async (email: string, password: string) => {
-    // 1. Generate XRPL Wallet
     const wallet = xrplService.generateWallet();
 
-    // 1.b Fund wallet from testnet faucet (Testnet only)
     try {
-      if (wallet.seed) {
-        await xrplService.fundTestnetWallet(wallet.seed);
-      }
+      if (wallet.seed) await xrplService.fundTestnetWallet(wallet.seed);
     } catch (e) {
       console.warn('Could not fund testnet wallet automatically.', e);
     }
 
-    // 2. Sign up with Supabase and include address in metadata
     const {data, error} = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: {
-          address: wallet.address,
-        },
-      },
+      options: {data: {address: wallet.address}},
     });
 
     if (!error && data.user) {
-      // 3. Store seed securely in Keychain
       await Keychain.setGenericPassword(wallet.address, wallet.seed!, {
         service: `xrpl-${data.user.id}`,
       });
+      await tokenService.ensureProfile(data.user.id);
     }
 
     return {error, data};
   };
 
+  const signInWithGoogle = async (): Promise<{error: any}> => {
+    try {
+      const {data, error} = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'scrolltax://auth-callback',
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) return {error};
+      if (!data.url) return {error: new Error('No OAuth URL returned.')};
+
+      await Linking.openURL(data.url);
+      return {error: null};
+    } catch (err: any) {
+      return {error: err};
+    }
+  };
+
   const signOut = async () => {
-    // Do NOT clear the Keychain — the wallet seed must survive sign-out
-    // so it's available when the user signs back in on the same device.
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
   };
 
   return (
-    <AuthContext.Provider value={{user, isLoading, signIn, signUp, signOut}}>
+    <AuthContext.Provider value={{user, isLoading, signIn, signUp, signInWithGoogle, signOut, refreshTokenBalance}}>
       {children}
     </AuthContext.Provider>
   );

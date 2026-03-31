@@ -7,26 +7,28 @@ import {
   SafeAreaView,
   StatusBar,
   Animated,
+  Alert,
 } from 'react-native';
 import { Colors } from '../../theme/colors';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
+import { useAuth } from '../../services/AuthContext';
 import Logo from '../../components/Logo';
 
 const FEATURES = [
-  { icon: '💰', title: 'Stake XRP', desc: 'Lock funds into a group to commit to your goals.' },
-  { icon: '📵', title: 'Stay Focused', desc: 'Our tracker watches for excessive scrolling on distraction apps.' },
-  { icon: '⚡', title: 'Pay the Tax', desc: 'Scroll too long? XRP is automatically sent to the group pool.' },
-  { icon: '🏆', title: 'Win Together', desc: 'The most focused member earns back the most.' },
+  { icon: '$', title: 'Stake XRP', desc: 'Lock funds into a group to commit to your goals.' },
+  { icon: '⊘', title: 'Stay Focused', desc: 'Our tracker watches for excessive scrolling on distraction apps.' },
+  { icon: '✉', title: 'Pay the Tax', desc: 'Scroll too long? XRP is automatically sent to the group pool.' },
+  { icon: '◆', title: 'Win Together', desc: 'The most focused member earns back the most.' },
 ];
 
 const OnboardingScreen = ({ navigation }: any) => {
+  const { signInWithGoogle } = useAuth();
   const logoAnim     = useEntranceAnimation(0);
   const feature0Anim = useEntranceAnimation(120);
   const feature1Anim = useEntranceAnimation(200);
   const feature2Anim = useEntranceAnimation(280);
   const feature3Anim = useEntranceAnimation(360);
-  const badgeAnim    = useEntranceAnimation(440);
-  const ctaAnim      = useEntranceAnimation(490);
+  const ctaAnim      = useEntranceAnimation(440);
 
   const featureAnims = [feature0Anim, feature1Anim, feature2Anim, feature3Anim];
 
@@ -68,14 +70,6 @@ const OnboardingScreen = ({ navigation }: any) => {
           ))}
         </View>
 
-        {/* Network Badge */}
-        <Animated.View
-          style={[styles.networkBadge, { opacity: badgeAnim.opacity }]}
-        >
-          <View style={styles.networkDot} />
-          <Text style={styles.networkText}>Running on XRPL Testnet</Text>
-        </Animated.View>
-
         {/* CTA */}
         <Animated.View
           style={[
@@ -83,6 +77,18 @@ const OnboardingScreen = ({ navigation }: any) => {
             { opacity: ctaAnim.opacity, transform: [{ translateY: ctaAnim.translateY }] },
           ]}
         >
+          <TouchableOpacity
+            style={styles.googleButton}
+            activeOpacity={0.82}
+            onPress={async () => {
+              const { error } = await signInWithGoogle();
+              if (error) Alert.alert('Google Sign-In Failed', error.message || 'Please try again.');
+            }}
+          >
+            <Text style={styles.googleIcon}>G</Text>
+            <Text style={styles.googleButtonText}>Continue with Google</Text>
+          </TouchableOpacity>
+          <View style={styles.divider} />
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={() => navigation.navigate('Signup')}
@@ -111,7 +117,8 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingVertical: 20,
+    paddingTop: 20,
+    paddingBottom: 48,
     justifyContent: 'space-between',
   },
   logoSection: {
@@ -145,7 +152,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   featureIcon: {
-    fontSize: 22,
+    fontSize: 28,
+    color: Colors.primary,
+    fontWeight: '700',
   },
   featureText: {
     flex: 1,
@@ -162,29 +171,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 18,
   },
-  networkBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  networkDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: Colors.secondary,
-  },
-  networkText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    fontWeight: '500',
-  },
   cta: {
     gap: 12,
   },
   primaryButton: {
     backgroundColor: Colors.primary,
-    height: 58,
+    height: 48,
     borderRadius: 9999,
     justifyContent: 'center',
     alignItems: 'center',
@@ -196,19 +188,51 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
   secondaryButton: {
-    height: 48,
+    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
   },
   secondaryButtonText: {
     color: Colors.textMuted,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    marginVertical: 2,
+  },
+  googleButton: {
+    height: 48,
+    borderRadius: 9999,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  googleIcon: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4285F4',
+  },
+  googleButtonText: {
+    color: '#1F1F1F',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
 });
 

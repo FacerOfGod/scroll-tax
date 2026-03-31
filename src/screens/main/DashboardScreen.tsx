@@ -15,6 +15,11 @@ import {
   Animated,
   AppState,
   Linking,
+  Modal,
+  FlatList,
+  TextInput,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,7 +27,9 @@ import { Colors } from '../../theme/colors';
 import { useAuth } from '../../services/AuthContext';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../services/supabaseClient';
 import { xrplService } from '../../services/XrplService';
+import { ledgerService } from '../../services/LedgerService';
 import { groupService } from '../../services/GroupService';
+import { tokenService } from '../../services/TokenService';
 import { ScrollDetectionService } from '../../services/ScrollDetectionService';
 import * as Keychain from 'react-native-keychain';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
@@ -392,6 +399,10 @@ const waveStyles = StyleSheet.create({
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 interface TelegramSession {
   id: string;
   duration: number;
@@ -402,7 +413,7 @@ interface TelegramSession {
 }
 
 const DashboardScreen = ({ navigation }: any) => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshTokenBalance } = useAuth();
   const [balance, setBalance]             = useState<string | null>(null);
   const [penaltyCount, setPenaltyCount]   = useState(0);
   const [penaltyCost, setPenaltyCost]     = useState(0);
@@ -416,6 +427,28 @@ const DashboardScreen = ({ navigation }: any) => {
   const [xrpPrices, setXrpPrices] = useState<{ usd: number; eur: number; chf: number } | null>(null);
   const [currency, setCurrency]   = useState<'usd' | 'eur' | 'chf'>('usd');
   const [chartData, setChartData] = useState<{ prices: number[]; change24h: number } | null>(null);
+
+  // ─── Wallet tab state ─────────────────────────────────────────────────────
+  type WalletTab = 'app' | 'ledger' | 'tokens';
+  const [activeWalletTab, setActiveWalletTab] = useState<WalletTab>('app');
+  const tabIndicatorAnim  = useRef(new Animated.Value(0)).current;
+  const tabContentOpacity = useRef(new Animated.Value(1)).current;
+  const [tabRowWidth, setTabRowWidth] = useState(0);
+  type LedgerState = 'idle' | 'scanning' | 'connecting' | 'connected';
+  const [ledgerUiState, setLedgerUiState] = useState<LedgerState>('idle');
+  const [ledgerDevices, setLedgerDevices] = useState<Array<{ id: string; name: string }>>([]);
+  const [ledgerAddress, setLedgerAddress]   = useState<string | null>(null);
+  const [ledgerPubKey, setLedgerPubKey]     = useState<string | null>(null);
+  const [ledgerBalance, setLedgerBalance]   = useState<string>('0');
+  const [ledgerError, setLedgerError]       = useState<string | null>(null);
+  const [ledgerCopied, setLedgerCopied]     = useState(false);
+  const [sendModalVisible, setSendModalVisible] = useState(false);
+  const [sendDestination, setSendDestination]   = useState('');
+  const [sendAmount, setSendAmount]             = useState('');
+  const [isSending, setIsSending]               = useState(false);
+  const [sendError, setSendError]               = useState<string | null>(null);
+  const scanCleanupRef         = useRef<(() => void) | null>(null);
+  const connectingDeviceName   = useRef<string>('');
 
   const headerAnim  = useEntranceAnimation(0);
   const balanceAnim = useEntranceAnimation(100);
@@ -458,6 +491,38 @@ const DashboardScreen = ({ navigation }: any) => {
       }).start();
     });
   }, [fetchBalance, balanceOpacity]);
+
+  const handleWalletTabChange = useCallback((tab: WalletTab) => {
+    const tabIndex = tab === 'app' ? 0 : tab === 'ledger' ? 1 : 2;
+    Animated.timing(tabContentOpacity, {
+      toValue: 0,
+      duration: 100,
+      useNativeDriver: true,
+    }).start(() => {
+      setActiveWalletTab(tab);
+      if (tab === 'tokens') refreshTokenBalance();
+      Animated.spring(tabIndicatorAnim, {
+        toValue: tabIndex,
+        useNativeDriver: true,
+        tension: 180,
+        friction: 20,
+      }).start();
+    });
+  }, [tabIndicatorAnim, tabContentOpacity, refreshTokenBalance]);
+
+  useEffect(() => {
+    if (activeWalletTab) {
+      LayoutAnimation.configureNext({
+        duration: 300,
+        update: { type: LayoutAnimation.Types.spring, springDamping: 0.75 },
+      });
+      Animated.timing(tabContentOpacity, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [activeWalletTab]);
 
   const handleCopyAddress = useCallback(() => {
     if (!user?.address) return;
@@ -928,42 +993,156 @@ const DashboardScreen = ({ navigation }: any) => {
     setPenaltyCost(prev => prev + penaltyAmount);
     pendingPenalties.current.push({ appName: appName || packageName, amount: penaltyAmount });
 
-    const { data: members } = await groupService.getGroupMembers(group.id);
-    const otherMembers = members.filter((m: any) => m.user_id !== user!.id && m.wallet_address);
-
-    const credentials = await Keychain.getGenericPassword({ service: `xrpl-${user!.id}` });
-    if (!credentials) return;
+    const isTokenGroup = group.stake_type === 'tokens';
 
     try {
-      if (otherMembers.length === 0) {
-        await xrplService.sendXrp(credentials.password, DEV_WALLET, String(penaltyAmount));
+      if (isTokenGroup) {
+        // ── Token penalty path ──────────────────────────────────────────────
+        const allMemberIds = await groupService.getGroupMemberIds(group.id);
+        const otherMemberIds = allMemberIds.filter(id => id !== user!.id);
+
+        await tokenService.redistributePenalty(user!.id, otherMemberIds, penaltyAmount);
         ScrollDetectionService.showNotification(
-          `💸 ${penaltyAmount} XRP sent to the pot`,
-          `Penalty for ${appName} — no group mates yet, sent to the house.`,
+          `◈ ${penaltyAmount} Tokens deducted`,
+          otherMemberIds.length > 0
+            ? `Penalty for ${appName} — split to ${otherMemberIds.length} member(s).`
+            : `Penalty for ${appName} — tokens removed.`,
         );
+        // Refresh the token balance shown in the Tokens tab
+        refreshTokenBalance();
       } else {
-        const share = Math.floor((penaltyAmount / otherMembers.length) * 1e6) / 1e6;
-        await Promise.all(
-          otherMembers.map((m: any) =>
-            xrplService.sendXrp(credentials.password, m.wallet_address, String(share)),
-          ),
-        );
-        ScrollDetectionService.showNotification(
-          `💸 ${penaltyAmount} XRP split to the group`,
-          `Penalty for ${appName} — ${share} XRP sent to each of ${otherMembers.length} member(s).`,
-        );
+        // ── XRP penalty path ────────────────────────────────────────────────
+        const { data: members } = await groupService.getGroupMembers(group.id);
+        const otherMembers = members.filter((m: any) => m.user_id !== user!.id && m.wallet_address);
+
+        const credentials = await Keychain.getGenericPassword({ service: `xrpl-${user!.id}` });
+        if (!credentials) return;
+
+        if (otherMembers.length === 0) {
+          await xrplService.sendXrp(credentials.password, DEV_WALLET, String(penaltyAmount));
+          ScrollDetectionService.showNotification(
+            `💸 ${penaltyAmount} XRP sent to the pot`,
+            `Penalty for ${appName} — no group mates yet, sent to the house.`,
+          );
+        } else {
+          const share = Math.floor((penaltyAmount / otherMembers.length) * 1e6) / 1e6;
+          await Promise.all(
+            otherMembers.map((m: any) =>
+              xrplService.sendXrp(credentials.password, m.wallet_address, String(share)),
+            ),
+          );
+          ScrollDetectionService.showNotification(
+            `💸 ${penaltyAmount} XRP split to the group`,
+            `Penalty for ${appName} — ${share} XRP sent to each of ${otherMembers.length} member(s).`,
+          );
+        }
+        fetchBalance();
       }
 
       await groupService.recordPenalty(user!.id, group.id, penaltyAmount);
-      fetchBalance();
     } catch (e: any) {
       setPenaltyCount(prev => prev - 1);
       setPenaltyCost(prev => prev - penaltyAmount);
       pendingPenalties.current.pop();
-      Alert.alert('Payment Failed', e?.message || 'Could not send XRP penalty.');
+      Alert.alert('Payment Failed', e?.message || 'Could not process penalty.');
     }
   };
   handlePenaltyRef.current = handlePenaltyTriggered;
+
+  // ─── Ledger handlers ──────────────────────────────────────────────────────
+
+  const handleStartScan = useCallback(async () => {
+    setLedgerError(null);
+    const granted = await ledgerService.requestPermissions();
+    if (!granted) {
+      setLedgerError('Bluetooth permission required');
+      return;
+    }
+    setLedgerDevices([]);
+    setLedgerUiState('scanning');
+    const cleanup = ledgerService.scanDevices(device => {
+      setLedgerDevices(prev =>
+        prev.find(d => d.id === device.id) ? prev : [...prev, device],
+      );
+    });
+    scanCleanupRef.current = cleanup;
+    // Auto-stop after 30 seconds
+    setTimeout(() => {
+      if (scanCleanupRef.current) {
+        scanCleanupRef.current();
+        scanCleanupRef.current = null;
+        setLedgerUiState(s => (s === 'scanning' ? 'idle' : s));
+      }
+    }, 30_000);
+  }, []);
+
+  const handleStopScan = useCallback(() => {
+    scanCleanupRef.current?.();
+    scanCleanupRef.current = null;
+    setLedgerUiState('idle');
+  }, []);
+
+  const handleConnectDevice = useCallback(async (device: { id: string; name: string }) => {
+    handleStopScan();
+    connectingDeviceName.current = device.name;
+    setLedgerUiState('connecting');
+    setLedgerError(null);
+    try {
+      await ledgerService.connect(device.id, device.name);
+      const { address, publicKey } = await ledgerService.getAddress();
+      setLedgerAddress(address);
+      setLedgerPubKey(publicKey);
+      const bal = await xrplService.getBalance(address);
+      setLedgerBalance(bal);
+      setLedgerUiState('connected');
+    } catch (err: any) {
+      setLedgerError(err?.message ?? 'Connection failed');
+      setLedgerUiState('idle');
+    }
+  }, [handleStopScan]);
+
+  const handleLedgerDisconnect = useCallback(async () => {
+    await ledgerService.disconnect();
+    setLedgerUiState('idle');
+    setLedgerAddress(null);
+    setLedgerPubKey(null);
+    setLedgerBalance('0');
+    setLedgerError(null);
+  }, []);
+
+  const handleLedgerCopyAddress = useCallback(() => {
+    if (!ledgerAddress) return;
+    Clipboard.setString(ledgerAddress);
+    setLedgerCopied(true);
+    setTimeout(() => setLedgerCopied(false), 2000);
+  }, [ledgerAddress]);
+
+  const handleLedgerSend = useCallback(async () => {
+    if (!ledgerAddress || !ledgerPubKey) return;
+    if (!sendDestination.trim()) { setSendError('Enter a destination address'); return; }
+    const amt = parseFloat(sendAmount);
+    if (isNaN(amt) || amt <= 0) { setSendError('Enter a valid amount'); return; }
+    setSendError(null);
+    setIsSending(true);
+    try {
+      await ledgerService.signAndSubmitPayment({
+        fromAddress: ledgerAddress,
+        publicKey: ledgerPubKey,
+        destination: sendDestination.trim(),
+        amountXrp: sendAmount.trim(),
+      });
+      setSendModalVisible(false);
+      setSendDestination('');
+      setSendAmount('');
+      const bal = await xrplService.getBalance(ledgerAddress);
+      setLedgerBalance(bal);
+      Alert.alert('Sent', 'Transaction confirmed on XRPL.');
+    } catch (err: any) {
+      setSendError(err?.message ?? 'Transaction failed');
+    } finally {
+      setIsSending(false);
+    }
+  }, [ledgerAddress, ledgerPubKey, sendDestination, sendAmount]);
 
   const truncateAddress = (addr: string) =>
     addr ? `${addr.slice(0, 8)}...${addr.slice(-6)}` : '';
@@ -985,13 +1164,7 @@ const DashboardScreen = ({ navigation }: any) => {
           ]}
         >
           <View>
-            <Logo size="sm" showWordmark direction="horizontal" />
-            <View style={styles.addressRow}>
-              <Text style={styles.walletAddress}>{truncateAddress(user?.address || '')}</Text>
-              <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.6} style={styles.copyButton}>
-                <Text style={styles.copyButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
-              </TouchableOpacity>
-            </View>
+            <Logo size="md" showWordmark direction="horizontal" />
           </View>
           <TouchableOpacity style={styles.signOutButton} onPress={signOut} activeOpacity={0.7}>
             <Text style={styles.signOutText}>Sign Out</Text>
@@ -1005,89 +1178,239 @@ const DashboardScreen = ({ navigation }: any) => {
             { opacity: balanceAnim.opacity, transform: [{ translateY: balanceAnim.translateY }] },
           ]}
         >
-          <TouchableOpacity onPress={handleTapRefresh} activeOpacity={1}>
-            {/* Main content blurs on tap */}
-            <Animated.View style={[styles.balanceCardInner, { opacity: balanceOpacity }]}>
-              {/* Left: total balance */}
-              <View style={styles.balanceLeft}>
-                <Text style={styles.balanceLabel}>Total Balance</Text>
-                {balance === null ? (
-                  <ActivityIndicator color={Colors.primary} style={{ marginTop: 8 }} />
-                ) : (
-                  <>
-                    <View style={styles.balanceRow}>
-                      <AnimatedNumber value={parseFloat(balance)} decimals={2} style={styles.balanceValue} />
-                      <Text style={styles.balanceCurrencyInline}>XRP</Text>
-                    </View>
-                    {xrpPrices && (
-                      <AnimatedNumber
-                        value={parseFloat(balance) * xrpPrices[currency]}
-                        decimals={2}
-                        style={styles.fiatValue}
-                        prefix={({ usd: '$', eur: '€', chf: 'Fr.' } as Record<string, string>)[currency]}
-                        suffix={` ${currency.toUpperCase()}`}
-                      />
-                    )}
-                    <View style={styles.currencyRow}>
-                      {(['usd', 'eur', 'chf'] as const).map(c => (
-                        <TouchableOpacity
-                          key={c}
-                          onPress={() => setCurrency(c)}
-                          style={[styles.currencyChip, currency === c && styles.currencyChipActive]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Text style={[styles.currencyChipText, currency === c && styles.currencyChipTextActive]}>
-                            {c.toUpperCase()}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </>
-                )}
-              </View>
+          {/* Wallet tab selector */}
+          <View
+            style={styles.walletTabRow}
+            onLayout={e => setTabRowWidth(e.nativeEvent.layout.width)}
+          >
+            {(['app', 'ledger', 'tokens'] as const).map(tab => (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => handleWalletTabChange(tab)}
+                style={styles.walletTab}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.walletTabText, activeWalletTab === tab && styles.walletTabTextActive]}>
+                  {tab === 'app' ? 'App Wallet' : tab === 'ledger' ? '▣  Ledger' : '◈  Tokens'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {tabRowWidth > 0 && (
+              <Animated.View
+                style={[
+                  styles.walletTabIndicator,
+                  {
+                    width: tabRowWidth / 3,
+                    transform: [{
+                      translateX: tabIndicatorAnim.interpolate({
+                        inputRange: [0, 1, 2],
+                        outputRange: [0, tabRowWidth / 3, (tabRowWidth / 3) * 2],
+                      }),
+                    }],
+                  },
+                ]}
+              />
+            )}
+          </View>
 
-              <View style={styles.cardDividerV} />
-
-              {/* Right: stats */}
-              <View style={styles.balanceRight}>
-                <View style={styles.statItem}>
-                  <AnimatedNumber value={penaltyCount} decimals={0} style={styles.statValue} />
-                  <Text style={styles.statLabel}>Penalties</Text>
-                </View>
-                <View style={styles.statItemDivider} />
-                <View style={styles.statItem}>
-                  <AnimatedNumber
-                    value={penaltyCost}
-                    decimals={2}
-                    style={[styles.statValue, penaltyCost > 0 && { color: Colors.error }]}
-                  />
-                  <Text style={styles.statLabel}>XRP Lost</Text>
-                </View>
-                <View style={styles.statItemDivider} />
-                <View style={styles.statItem}>
-                  {balance !== null ? (
-                    <AnimatedNumber
-                      value={parseFloat(balance) - penaltyCost}
-                      decimals={2}
-                      style={styles.statValue}
-                    />
+          <Animated.View style={{ opacity: tabContentOpacity }}>
+          {activeWalletTab === 'app' ? (
+            <TouchableOpacity onPress={handleTapRefresh} activeOpacity={1}>
+              {/* Main content blurs on tap */}
+              <Animated.View style={[styles.balanceCardInner, { opacity: balanceOpacity }]}>
+                {/* Left: total balance */}
+                <View style={styles.balanceLeft}>
+                  <Text style={styles.balanceLabel}>Total Balance</Text>
+                  {balance === null ? (
+                    <ActivityIndicator color={Colors.primary} style={{ marginTop: 8 }} />
                   ) : (
-                    <Text style={styles.statValue}>—</Text>
+                    <>
+                      <View style={styles.balanceRow}>
+                        <AnimatedNumber value={parseFloat(balance)} decimals={2} style={styles.balanceValue} />
+                        <Text style={styles.balanceCurrencyInline}>XRP</Text>
+                      </View>
+                      {xrpPrices && (
+                        <AnimatedNumber
+                          value={parseFloat(balance) * xrpPrices[currency]}
+                          decimals={2}
+                          style={styles.fiatValue}
+                          prefix={({ usd: '$', eur: '€', chf: 'Fr.' } as Record<string, string>)[currency]}
+                          suffix={` ${currency.toUpperCase()}`}
+                        />
+                      )}
+                      <View style={styles.currencyRow}>
+                        {(['usd', 'eur', 'chf'] as const).map(c => (
+                          <TouchableOpacity
+                            key={c}
+                            onPress={() => setCurrency(c)}
+                            style={[styles.currencyChip, currency === c && styles.currencyChipActive]}
+                            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                          >
+                            <Text style={[styles.currencyChipText, currency === c && styles.currencyChipTextActive]}>
+                              {c.toUpperCase()}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
                   )}
-                  <Text style={styles.statLabel}>Net Balance</Text>
                 </View>
-              </View>
-            </Animated.View>
 
-            {/* Footer: wave + hint always mounted, cross-fade via active prop */}
-            <View style={styles.cardFooter}>
-              <PixelWave active={isRefreshingBalance} />
+                <View style={styles.cardDividerV} />
+
+                {/* Right: stats */}
+                <View style={styles.balanceRight}>
+                  <View style={styles.statItem}>
+                    <AnimatedNumber value={penaltyCount} decimals={0} style={styles.statValue} />
+                    <Text style={styles.statLabel}>Penalties</Text>
+                  </View>
+                  <View style={styles.statItemDivider} />
+                  <View style={styles.statItem}>
+                    <AnimatedNumber
+                      value={penaltyCost}
+                      decimals={2}
+                      style={[styles.statValue, penaltyCost > 0 && { color: Colors.error }]}
+                    />
+                    <Text style={styles.statLabel}>XRP Lost</Text>
+                  </View>
+                  <View style={styles.statItemDivider} />
+                  <View style={styles.statItem}>
+                    {balance !== null ? (
+                      <AnimatedNumber
+                        value={parseFloat(balance) - penaltyCost}
+                        decimals={2}
+                        style={styles.statValue}
+                      />
+                    ) : (
+                      <Text style={styles.statValue}>—</Text>
+                    )}
+                    <Text style={styles.statLabel}>Net Balance</Text>
+                  </View>
+                </View>
+              </Animated.View>
+
+              {/* Footer: wave + hint always mounted, cross-fade via active prop */}
+              <View style={styles.addressFooterRow}>
+                <Text style={styles.walletAddress} numberOfLines={1} adjustsFontSizeToFit>{user?.address || ''}</Text>
+                <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.6} style={styles.copyButton}>
+                  <Text style={styles.copyButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.cardFooter}>
+                <PixelWave active={isRefreshingBalance} />
+              </View>
+            </TouchableOpacity>
+          ) : activeWalletTab === 'ledger' ? (
+            /* ── Ledger tab ── */
+            <View style={styles.ledgerTabContent}>
+              {ledgerUiState === 'idle' && (
+                <>
+                  <Text style={styles.ledgerIdleTitle}>Connect Ledger Nano X</Text>
+                  <Text style={styles.ledgerIdleSub}>Sign XRP transactions with your hardware wallet</Text>
+                  <TouchableOpacity style={styles.ledgerScanBtn} onPress={handleStartScan} activeOpacity={0.8}>
+                    <Text style={styles.ledgerScanBtnText}>Scan for Devices</Text>
+                  </TouchableOpacity>
+                  {ledgerError && <Text style={styles.ledgerError}>{ledgerError}</Text>}
+                </>
+              )}
+
+              {ledgerUiState === 'scanning' && (
+                <>
+                  <View style={styles.ledgerRow}>
+                    <ActivityIndicator color={Colors.primary} size="small" />
+                    <Text style={styles.ledgerScanningText}>Searching for devices…</Text>
+                  </View>
+                  <Text style={styles.ledgerTip}>Open the XRP app on your Ledger before connecting</Text>
+                  {ledgerDevices.length > 0 && (
+                    <FlatList
+                      data={ledgerDevices}
+                      keyExtractor={d => d.id}
+                      scrollEnabled={false}
+                      style={{ width: '100%', marginTop: 8 }}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.ledgerDeviceRow}
+                          onPress={() => handleConnectDevice(item)}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={styles.ledgerDeviceName}>{item.name}</Text>
+                          <Text style={styles.ledgerDeviceConnect}>Connect ›</Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  )}
+                  <TouchableOpacity onPress={handleStopScan} style={{ marginTop: 10 }}>
+                    <Text style={styles.ledgerStopText}>Stop scanning</Text>
+                  </TouchableOpacity>
+                  {ledgerError && <Text style={styles.ledgerError}>{ledgerError}</Text>}
+                </>
+              )}
+
+              {ledgerUiState === 'connecting' && (
+                <>
+                  <ActivityIndicator color={Colors.primary} />
+                  <Text style={styles.ledgerScanningText}>
+                    Connecting to {connectingDeviceName.current}…
+                  </Text>
+                  <Text style={styles.ledgerTip}>Make sure the XRP app is open on your Ledger</Text>
+                </>
+              )}
+
+              {ledgerUiState === 'connected' && ledgerAddress && (
+                <>
+                  <View style={styles.ledgerConnectedBadge}>
+                    <Text style={styles.ledgerConnectedLabel}>▣  Hardware Wallet</Text>
+                  </View>
+                  <View style={styles.ledgerAddressRow}>
+                    <Text style={styles.walletAddress}>{truncateAddress(ledgerAddress)}</Text>
+                    <TouchableOpacity onPress={handleLedgerCopyAddress} style={styles.copyButton}>
+                      <Text style={styles.copyButtonText}>{ledgerCopied ? 'Copied' : 'Copy'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={[styles.balanceRow, { marginTop: 12 }]}>
+                    <AnimatedNumber value={parseFloat(ledgerBalance)} decimals={2} style={styles.balanceValue} />
+                    <Text style={styles.balanceCurrencyInline}>XRP</Text>
+                  </View>
+                  {xrpPrices && (
+                    <AnimatedNumber
+                      value={parseFloat(ledgerBalance) * xrpPrices[currency]}
+                      decimals={2}
+                      style={styles.fiatValue}
+                      prefix={({ usd: '$', eur: '€', chf: 'Fr.' } as Record<string, string>)[currency]}
+                      suffix={` ${currency.toUpperCase()}`}
+                    />
+                  )}
+                  <TouchableOpacity
+                    style={[styles.ledgerScanBtn, { marginTop: 18 }]}
+                    onPress={() => { setSendError(null); setSendModalVisible(true); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.ledgerScanBtnText}>Send XRP</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleLedgerDisconnect} style={{ marginTop: 10 }}>
+                    <Text style={styles.ledgerStopText}>Disconnect</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
-          </TouchableOpacity>
+          ) : (
+            /* ── Tokens tab ── */
+            <View style={styles.tokenTabContent}>
+              <View style={styles.tokenIconRow}>
+                <Text style={styles.tokenIcon}>◈</Text>
+                <Text style={styles.tokenBalanceValue}>{user?.tokens ?? '—'}</Text>
+                <Text style={styles.tokenBalanceUnit}>Tokens</Text>
+              </View>
+              <Text style={styles.tokenDescription}>
+                In-app currency · Use for staking or redeeming gifts
+              </Text>
+            </View>
+          )}
+          </Animated.View>
         </Animated.View>
 
-        {/* Market Chart */}
-        {chartData && xrpPrices && (
+        {/* Market Chart — hidden when Tokens tab is active */}
+        {activeWalletTab !== 'tokens' && chartData && xrpPrices && (
           <Animated.View style={{ opacity: balanceAnim.opacity, transform: [{ translateY: balanceAnim.translateY }] }}>
             <MiniPriceChart
               prices={chartData.prices}
@@ -1095,6 +1418,20 @@ const DashboardScreen = ({ navigation }: any) => {
               currentPrice={xrpPrices[currency]}
               currency={currency}
             />
+          </Animated.View>
+        )}
+
+        {/* Gift Shop — shown only when Tokens tab is active */}
+        {activeWalletTab === 'tokens' && (
+          <Animated.View style={[styles.giftShopCard, { opacity: balanceAnim.opacity, transform: [{ translateY: balanceAnim.translateY }], alignSelf: 'stretch' }]}>
+            <View style={styles.giftShopHeader}>
+              <Text style={styles.giftShopTitle}>Gift Shop</Text>
+              <View style={styles.giftShopBadge}>
+                <Text style={styles.giftShopBadgeText}>COMING SOON</Text>
+              </View>
+            </View>
+            <Text style={styles.giftShopSub}>Redeem your tokens for rewards</Text>
+
           </Animated.View>
         )}
 
@@ -1185,6 +1522,21 @@ const DashboardScreen = ({ navigation }: any) => {
               </View>
               <Text style={styles.actionChevron}>›</Text>
             </TouchableOpacity>
+
+            <View style={styles.actionBarDivider} />
+
+            <TouchableOpacity
+              style={styles.actionBar}
+              onPress={() => navigation.navigate('CryptoGuide')}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.actionIcon, { color: Colors.primary }]}>⬡</Text>
+              <View style={styles.actionBarText}>
+                <Text style={styles.actionLabel}>Crypto Guide</Text>
+                <Text style={styles.actionSub}>How blockchain & XRP work</Text>
+              </View>
+              <Text style={styles.actionChevron}>›</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Telegram Session */}
@@ -1228,6 +1580,55 @@ const DashboardScreen = ({ navigation }: any) => {
           </View>
         </Animated.View>
       </ScrollView>
+
+      {/* ── Ledger Send Modal ── */}
+      <Modal
+        visible={sendModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSendModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Send XRP via Ledger</Text>
+            <Text style={styles.modalLabel}>Destination address</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={sendDestination}
+              onChangeText={setSendDestination}
+              placeholder="r..."
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.modalLabel}>Amount (XRP)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={sendAmount}
+              onChangeText={setSendAmount}
+              placeholder="0.00"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="decimal-pad"
+            />
+            {sendError && <Text style={styles.ledgerError}>{sendError}</Text>}
+            <TouchableOpacity
+              style={[styles.ledgerScanBtn, isSending && { opacity: 0.6 }]}
+              onPress={handleLedgerSend}
+              disabled={isSending}
+              activeOpacity={0.8}
+            >
+              {isSending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.ledgerScanBtnText}>Confirm on Ledger</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSendModalVisible(false)} style={{ marginTop: 12, alignItems: 'center' }}>
+              <Text style={styles.ledgerStopText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1254,6 +1655,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   walletAddress: {
+    flex: 1,
     fontSize: 12,
     color: Colors.textMuted,
     fontFamily: 'monospace',
@@ -1307,11 +1709,13 @@ const styles = StyleSheet.create({
   cardDividerV: {
     width: 1,
     backgroundColor: 'rgba(42, 42, 42, 0.5)',
-    marginHorizontal: 20,
+    marginLeft: 28,
+    marginRight: 12,
   },
   balanceRight: {
-    flex: 1,
+    flex: 0.75,
     justifyContent: 'space-between',
+    paddingLeft: 14,
   },
   statItem: {
     flex: 1,
@@ -1322,6 +1726,13 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: 'rgba(42, 42, 42, 0.4)',
     marginVertical: 4,
+  },
+  addressFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 24,
   },
   cardFooter: {
     borderTopWidth: 1,
@@ -1585,7 +1996,7 @@ const styles = StyleSheet.create({
   permissionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.warning,
+    color: Colors.primary,
   },
   permissionSub: {
     fontSize: 11,
@@ -1594,8 +2005,328 @@ const styles = StyleSheet.create({
   },
   permissionChevron: {
     fontSize: 20,
-    color: Colors.warning,
+    color: Colors.primary,
     opacity: 0.7,
+  },
+
+  // ─── Wallet tabs ────────────────────────────────────────────────────────────
+  walletTabRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
+  },
+  walletTab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  walletTabActive: {
+    borderBottomWidth: 2,
+    borderBottomColor: Colors.primary,
+  },
+  walletTabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    height: 2,
+    backgroundColor: Colors.primary,
+  },
+  walletTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textMuted,
+    letterSpacing: -0.1,
+  },
+  walletTabTextActive: {
+    color: Colors.primary,
+  },
+
+  // ─── Ledger tab content ──────────────────────────────────────────────────────
+  ledgerTabContent: {
+    padding: 24,
+    alignItems: 'center',
+    minHeight: 180,
+    justifyContent: 'center',
+  },
+  ledgerIdleTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 6,
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  ledgerIdleSub: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 18,
+    lineHeight: 17,
+  },
+  ledgerScanBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    width: '100%',
+  },
+  ledgerScanBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+    letterSpacing: -0.2,
+  },
+  ledgerError: {
+    color: Colors.error,
+    fontSize: 12,
+    marginTop: 10,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  ledgerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  ledgerScanningText: {
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  ledgerTip: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 16,
+  },
+  ledgerDeviceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255, 83, 0, 0.07)',
+    borderRadius: 10,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 83, 0, 0.2)',
+  },
+  ledgerDeviceName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  ledgerDeviceConnect: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  ledgerStopText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  ledgerConnectedBadge: {
+    backgroundColor: 'rgba(255, 83, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 83, 0, 0.3)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 12,
+  },
+  ledgerConnectedLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.primary,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  ledgerAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  // ─── Send Modal ─────────────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderBottomWidth: 0,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.text,
+    marginBottom: 18,
+    letterSpacing: -0.4,
+    textAlign: 'center',
+  },
+  modalLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+    marginTop: 12,
+  },
+  modalInput: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(42, 42, 42, 0.7)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: Colors.text,
+    fontFamily: 'monospace',
+  },
+
+  // ─── Gift Shop card ───────────────────────────────────────────────────────
+  giftShopCard: {
+    marginTop: 0,
+    marginBottom: 28,
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 20,
+  },
+  giftShopHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  giftShopTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text,
+    letterSpacing: -0.3,
+  },
+  giftShopBadge: {
+    backgroundColor: 'rgba(255, 83, 0, 0.12)',
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  giftShopBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.primary,
+    letterSpacing: 0.5,
+  },
+  giftShopSub: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginBottom: 16,
+  },
+  giftShopGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  giftShopItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+    opacity: 0.4,
+  },
+  giftShopItemIcon: {
+    fontSize: 22,
+  },
+  giftShopItemLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: Colors.textMuted,
+    letterSpacing: 0.2,
+  },
+
+  // ─── Wallet tab: active token overrides ────────────────────────────────────
+  walletTabActiveToken: {
+    borderBottomColor: Colors.primary,
+  },
+  walletTabTextActiveToken: {
+    color: Colors.primary,
+  },
+
+  // ─── Tokens tab content ───────────────────────────────────────────────────
+  tokenTabContent: {
+    padding: 24,
+    alignItems: 'center',
+    minHeight: 180,
+    justifyContent: 'center',
+    gap: 6,
+  },
+  tokenIconRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 4,
+  },
+  tokenIcon: {
+    fontSize: 22,
+    color: Colors.primary,
+  },
+  tokenBalanceValue: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: Colors.text,
+    letterSpacing: -1,
+  },
+  tokenBalanceUnit: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
+    letterSpacing: -0.3,
+  },
+  tokenDescription: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  tokenDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    width: '100%',
+    marginVertical: 12,
+  },
+  tokenComingSoonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  tokenComingSoonLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textMuted,
+  },
+  tokenComingSoonBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.primary,
+    backgroundColor: 'rgba(255, 83, 0, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    overflow: 'hidden',
   },
 });
 

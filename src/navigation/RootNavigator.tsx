@@ -1,6 +1,6 @@
 import React, {useEffect} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
-import {createStackNavigator} from '@react-navigation/stack';
+import {createStackNavigator, CardStyleInterpolators} from '@react-navigation/stack';
 import {Linking} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
@@ -12,6 +12,7 @@ import GroupsScreen from '../screens/main/GroupsScreen';
 import GroupDashboardScreen from '../screens/main/GroupDashboardScreen';
 import DistractionSettingsScreen from '../screens/main/DistractionSettingsScreen';
 import LinkTelegramScreen from '../screens/main/LinkTelegramScreen';
+import CryptoGuideScreen from '../screens/main/CryptoGuideScreen';
 import {useAuth, AuthProvider} from '../services/AuthContext';
 import {View, ActivityIndicator} from 'react-native';
 import {Colors} from '../theme/colors';
@@ -102,6 +103,12 @@ const NavigationContent = () => {
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
+          cardStyleInterpolator: CardStyleInterpolators.forFadeFromCenter,
+          gestureEnabled: false,
+          transitionSpec: {
+            open: {animation: 'timing', config: {duration: 400}},
+            close: {animation: 'timing', config: {duration: 800}},
+          },
         }}>
         {user ? (
           <>
@@ -111,6 +118,7 @@ const NavigationContent = () => {
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
             <Stack.Screen name="DistractionSettings" component={DistractionSettingsScreen} />
             <Stack.Screen name="LinkTelegram" component={LinkTelegramScreen} />
+            <Stack.Screen name="CryptoGuide" component={CryptoGuideScreen} />
           </>
         ) : (
           <>

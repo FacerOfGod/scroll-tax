@@ -8,6 +8,11 @@ import {
   SafeAreaView,
   RefreshControl,
   Animated,
+  Alert,
+  TextInput,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useAuth } from '../../services/AuthContext';
 import { groupService } from '../../services/GroupService';
@@ -26,6 +31,8 @@ export default function GroupsScreen() {
   const [groups, setGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [joinModalVisible, setJoinModalVisible] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
 
   const headerAnim = useEntranceAnimation(0);
   const listAnim = useRef(new Animated.Value(0)).current;
@@ -38,14 +45,14 @@ export default function GroupsScreen() {
 
   // Fade list in after data loads
   useEffect(() => {
-    if (!loading && groups.length > 0) {
+    if (!loading) {
       Animated.timing(listAnim, {
         toValue: 1,
         duration: 400,
         useNativeDriver: true,
       }).start();
     }
-  }, [loading, groups.length]);
+  }, [loading]);
 
   const loadGroups = async () => {
     setLoading(true);
@@ -70,6 +77,21 @@ export default function GroupsScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     loadGroups();
+  };
+
+  const handleJoinWithCode = async () => {
+    const code = inviteCode.trim();
+    if (!code) return;
+    setJoinModalVisible(false);
+    setInviteCode('');
+    const { data, error } = await groupService.fetchGroups(user!.id);
+    // Navigate to group dashboard if the invite code matches a group id
+    const matched = (data as any[])?.find((m: any) => m.groups?.id === code || m.groups?.invite_code === code);
+    if (matched) {
+      navigation.navigate('GroupDashboard', { groupId: matched.groups.id });
+    } else {
+      Alert.alert('Invalid Code', 'No group found with that invite code. Ask your group admin for the correct link.');
+    }
   };
 
   const activeGroups = groups.filter((g: any) => g.status === 'active');
@@ -155,9 +177,27 @@ export default function GroupsScreen() {
         >
           {groups.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>👥</Text>
+              <Text style={styles.emptyIcon}>◉◉</Text>
               <Text style={styles.emptyTitle}>No Groups Yet</Text>
-              <Text style={styles.emptyText}>Create or join a group to start your accountability journey.</Text>
+              <Text style={styles.emptyText}>
+                Join an existing group with an invite code, or create your own to start holding each other accountable.
+              </Text>
+              <View style={styles.emptyActions}>
+                <TouchableOpacity
+                  style={styles.emptyBtnPrimary}
+                  onPress={() => navigation.navigate('CreateGroup')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.emptyBtnPrimaryText}>Create a Group</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.emptyBtnSecondary}
+                  onPress={() => setJoinModalVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.emptyBtnSecondaryText}>Join with Code</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             <>
@@ -185,6 +225,47 @@ export default function GroupsScreen() {
       >
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
+
+      <Modal
+        visible={joinModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setJoinModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Join a Group</Text>
+            <Text style={styles.modalSubtitle}>Enter the invite code shared by your group admin.</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Invite code"
+              placeholderTextColor={Colors.textMuted}
+              value={inviteCode}
+              onChangeText={setInviteCode}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalBtnCancel}
+                onPress={() => { setJoinModalVisible(false); setInviteCode(''); }}
+              >
+                <Text style={styles.modalBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtnJoin, !inviteCode.trim() && styles.modalBtnDisabled]}
+                onPress={handleJoinWithCode}
+                disabled={!inviteCode.trim()}
+              >
+                <Text style={styles.modalBtnJoinText}>Join</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -328,6 +409,7 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 48,
+    color: Colors.primary,
   },
   emptyTitle: {
     fontSize: 20,
@@ -375,5 +457,102 @@ const styles = StyleSheet.create({
   sectionHeaderMuted: {
     color: Colors.textMuted,
     marginTop: 20,
+  },
+  emptyActions: {
+    marginTop: 8,
+    gap: 12,
+    width: '100%',
+  },
+  emptyBtnPrimary: {
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  emptyBtnPrimaryText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  emptyBtnSecondary: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  emptyBtnSecondaryText: {
+    color: Colors.primary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  modalCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    lineHeight: 20,
+  },
+  modalInput: {
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: 'rgba(42,42,42,0.6)',
+    marginTop: 4,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalBtnCancel: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(42,42,42,0.6)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalBtnCancelText: {
+    color: Colors.textMuted,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalBtnJoin: {
+    flex: 1,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalBtnDisabled: {
+    opacity: 0.4,
+  },
+  modalBtnJoinText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
