@@ -1,11 +1,41 @@
 import React, {createContext, useContext, useState, useEffect} from 'react';
-import {Linking} from 'react-native';
+import {Linking, DeviceEventEmitter} from 'react-native';
 import * as Keychain from 'react-native-keychain';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {xrplService} from '../services/XrplService';
 import {tokenService} from '../services/TokenService';
+import {selfBetService, ACCOUNT_CONNECTED_EVENT} from '../services/SelfBetService';
 import {supabase} from './supabaseClient';
 import {Session} from '@supabase/supabase-js';
+
+// Routes an incoming scrolltax:// deep link. Strava is a non-Supabase OAuth, so
+// its callback carries a raw ?code we exchange ourselves; GitHub is linked via
+// Supabase (linkIdentity) and yields a provider_token we forward to the server;
+// everything else is a normal Supabase auth-session exchange (e.g. Google).
+const handleOAuthDeepLink = async (url: string) => {
+  try {
+    if (url.includes('strava-callback')) {
+      const code = url.match(/[?&]code=([^&]+)/)?.[1];
+      if (code) {
+        await selfBetService.connectAccount('strava', {code: decodeURIComponent(code)});
+        DeviceEventEmitter.emit(ACCOUNT_CONNECTED_EVENT, {provider: 'strava'});
+      }
+      return;
+    }
+    if (url.includes('github-callback')) {
+      const {data} = await supabase.auth.exchangeCodeForSession(url);
+      const providerToken = data?.session?.provider_token;
+      if (providerToken) {
+        await selfBetService.connectAccount('github', {provider_token: providerToken});
+        DeviceEventEmitter.emit(ACCOUNT_CONNECTED_EVENT, {provider: 'github'});
+      }
+      return;
+    }
+    // Default: Supabase auth callback (Google sign-in, etc.)
+    await supabase.auth.exchangeCodeForSession(url);
+  } catch (e) {
+    console.warn('OAuth deep link handling failed:', e);
+  }
+};
 
 interface User {
   id: string;
@@ -58,8 +88,11 @@ export const AuthProvider: React.FC<{children: React.ReactNode}> = ({children}) 
     });
     // Load token balance in the background and patch it in once available
     tokenService.getBalance(supabaseUser.id).then(tokens => {
-      setUser(prev => (prev?.id === supabaseUser.id ? {...prev, tokens} : prev));
-    }).catch(() => {});
+      setUser(prev => {
+        if (!prev || prev.id !== supabaseUser.id) return prev;
+        return {...prev, tokens};
+      });
+    }).catch(err => console.warn('Failed to load token balance:', err));
   };
 
   useEffect(() => {
@@ -90,14 +123,14 @@ export const AuthProvider: React.FC<{children: React.ReactNode}> = ({children}) 
     // Handle OAuth redirect when app is already open
     const linkingSub = Linking.addEventListener('url', ({url}) => {
       if (url.startsWith('scrolltax://')) {
-        supabase.auth.exchangeCodeForSession(url).catch(console.warn);
+        handleOAuthDeepLink(url);
       }
     });
 
     // Handle OAuth redirect when app was launched cold via deep link
     Linking.getInitialURL().then(url => {
       if (url?.startsWith('scrolltax://')) {
-        supabase.auth.exchangeCodeForSession(url).catch(console.warn);
+        handleOAuthDeepLink(url);
       }
     });
 

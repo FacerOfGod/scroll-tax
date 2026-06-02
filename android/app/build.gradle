@@ -72,6 +72,15 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Release signing credentials are loaded from a gitignored keystore.properties
+// at the android/ root (see keystore.properties.example). Real signing secrets
+// must never be committed to version control.
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -93,10 +102,10 @@ android {
             keyPassword 'android'
         }
         release {
-            storeFile file('scrolltax-release.keystore')
-            storePassword 'scrolltax2026'
-            keyAlias 'scrolltax'
-            keyPassword 'scrolltax2026'
+            storeFile file(keystoreProperties.getProperty('RELEASE_STORE_FILE', 'scrolltax-release.keystore'))
+            storePassword keystoreProperties.getProperty('RELEASE_STORE_PASSWORD')
+            keyAlias keystoreProperties.getProperty('RELEASE_KEY_ALIAS')
+            keyPassword keystoreProperties.getProperty('RELEASE_KEY_PASSWORD')
         }
     }
     buildTypes {
@@ -104,7 +113,9 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release
+            // Use the real release keystore when keystore.properties is present;
+            // otherwise fall back to debug signing so local release builds still work.
+            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }

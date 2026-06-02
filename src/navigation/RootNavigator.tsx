@@ -11,25 +11,21 @@ import CreateGroupScreen from '../screens/main/CreateGroupScreen';
 import GroupsScreen from '../screens/main/GroupsScreen';
 import GroupDashboardScreen from '../screens/main/GroupDashboardScreen';
 import DistractionSettingsScreen from '../screens/main/DistractionSettingsScreen';
-import LinkTelegramScreen from '../screens/main/LinkTelegramScreen';
 import CryptoGuideScreen from '../screens/main/CryptoGuideScreen';
+import SelfBetsScreen from '../screens/main/SelfBetsScreen';
+import CreateSelfBetScreen from '../screens/main/CreateSelfBetScreen';
+import ConnectedAccountsScreen from '../screens/main/ConnectedAccountsScreen';
 import {useAuth, AuthProvider} from '../services/AuthContext';
 import {View, ActivityIndicator} from 'react-native';
-import {Colors} from '../theme/colors';
+import {ThemeProvider, useTheme} from '../context/ThemeContext';
 
 export const PENDING_INVITE_KEY = 'pendingJoinGroupId';
-
-const PENDING_TELEGRAM_KEY = 'pendingTelegramId';
-export { PENDING_TELEGRAM_KEY };
-
-export const PENDING_SESSION_KEY = 'pendingSessionJoin';
 
 const linking = {
   prefixes: ['scrolltax://', 'https://apbjggxmtjgocafwzxza.supabase.co'],
   config: {
     screens: {
       GroupDashboard: 'join/:groupId',
-      LinkTelegram: 'link',
     },
   },
 };
@@ -38,6 +34,7 @@ const Stack = createStackNavigator();
 
 const NavigationContent = () => {
   const {user, isLoading} = useAuth();
+  const {colors} = useTheme();
 
   // Capture deep links when user is not authenticated — save for after login
   useEffect(() => {
@@ -49,16 +46,6 @@ const NavigationContent = () => {
 
       const joinGroupMatch = url.match(/\/join-group\?.*group_id=([^&]+)/);
       if (joinGroupMatch) AsyncStorage.setItem(PENDING_INVITE_KEY, joinGroupMatch[1].trim());
-
-      const linkMatch = url.match(/scrolltax:\/\/link\?telegram_id=([^&]+)/);
-      if (linkMatch) AsyncStorage.setItem(PENDING_TELEGRAM_KEY, linkMatch[1].trim());
-
-      const sessionMatch = url.match(/scrolltax:\/\/session\?id=([^&]+)/);
-      if (sessionMatch) {
-        AsyncStorage.setItem(PENDING_SESSION_KEY, sessionMatch[1].trim());
-        const tgMatch = url.match(/[?&]telegram_id=([^&]+)/);
-        if (tgMatch) AsyncStorage.setItem(PENDING_TELEGRAM_KEY, tgMatch[1].trim());
-      }
     };
 
     Linking.getInitialURL().then(url => { if (url) handleUrl(url); });
@@ -73,16 +60,6 @@ const NavigationContent = () => {
     const handleUrl = (url: string) => {
       const joinGroupMatch = url.match(/\/join-group\?.*group_id=([^&]+)/);
       if (joinGroupMatch) AsyncStorage.setItem(PENDING_INVITE_KEY, joinGroupMatch[1].trim());
-
-      const linkMatch = url.match(/scrolltax:\/\/link\?telegram_id=([^&]+)/);
-      if (linkMatch) AsyncStorage.setItem(PENDING_TELEGRAM_KEY, linkMatch[1].trim());
-
-      const sessionMatch = url.match(/scrolltax:\/\/session\?id=([^&]+)/);
-      if (sessionMatch) {
-        AsyncStorage.setItem(PENDING_SESSION_KEY, sessionMatch[1].trim());
-        const tgMatch = url.match(/[?&]telegram_id=([^&]+)/);
-        if (tgMatch) AsyncStorage.setItem(PENDING_TELEGRAM_KEY, tgMatch[1].trim());
-      }
     };
 
     Linking.getInitialURL().then(url => { if (url) handleUrl(url); });
@@ -92,8 +69,8 @@ const NavigationContent = () => {
 
   if (isLoading) {
     return (
-      <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background}}>
-        <ActivityIndicator size="large" color={Colors.primary} />
+      <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background}}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
@@ -117,8 +94,10 @@ const NavigationContent = () => {
             <Stack.Screen name="GroupDashboard" component={GroupDashboardScreen} />
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
             <Stack.Screen name="DistractionSettings" component={DistractionSettingsScreen} />
-            <Stack.Screen name="LinkTelegram" component={LinkTelegramScreen} />
             <Stack.Screen name="CryptoGuide" component={CryptoGuideScreen} />
+            <Stack.Screen name="SelfBets" component={SelfBetsScreen} />
+            <Stack.Screen name="CreateSelfBet" component={CreateSelfBetScreen} />
+            <Stack.Screen name="ConnectedAccounts" component={ConnectedAccountsScreen} />
           </>
         ) : (
           <>
@@ -134,9 +113,11 @@ const NavigationContent = () => {
 
 const RootNavigator = () => {
   return (
-    <AuthProvider>
-      <NavigationContent />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <NavigationContent />
+      </AuthProvider>
+    </ThemeProvider>
   );
 };
 

@@ -158,6 +158,9 @@ class GroupService {
 
   async deleteGroup(groupId: string) {
     try {
+      // Delete members first so foreign key constraints don't block the group delete
+      await supabase.from('group_members').delete().eq('group_id', groupId);
+
       const { data, error } = await supabase
         .from('groups')
         .delete()
@@ -191,24 +194,89 @@ class GroupService {
     }
   }
 
+  // Map of user_id -> held balance (drops) for a group's treasury ledger.
+  // Readable by active group members (see treasury_ledger RLS policy).
+  async getTreasuryBalances(groupId: string): Promise<Record<string, number>> {
+    try {
+      const { data, error } = await supabase
+        .from('treasury_ledger')
+        .select('user_id, balance_drops')
+        .eq('group_id', groupId);
+      if (error) throw error;
+      const map: Record<string, number> = {};
+      for (const r of data ?? []) map[(r as any).user_id] = Number((r as any).balance_drops);
+      return map;
+    } catch (err) {
+      console.warn('getTreasuryBalances error:', err);
+      return {};
+    }
+  }
+
+  // Treasury-backed group end: the edge function pays each member's remaining
+  // held balance back to their wallet on-chain, then marks the group ended.
+  async settleGroup(groupId: string): Promise<{ ok: boolean; error?: string; payouts?: any[] }> {
+    try {
+      const { data, error } = await supabase.functions.invoke('treasury', {
+        body: { action: 'settle_group', group_id: groupId },
+      });
+      if (error) throw error;
+      return data as { ok: boolean; error?: string; payouts?: any[] };
+    } catch (err: any) {
+      console.error('settleGroup error:', err);
+      return { ok: false, error: err?.message ?? 'unknown' };
+    }
+  }
+
   async getActiveGroupForUser(userId: string) {
     try {
       const { data, error } = await supabase
         .from('group_members')
         .select(`
           group_id,
+          status,
           groups (id, wallet_address, penalty_amount, name, banned_apps, penalty_trigger_time_minutes, status, stake_type)
         `)
         .eq('user_id', userId);
 
       if (error) throw error;
 
-      // Filter by the group's own status (not the membership row's status,
-      // which is never set by joinGroup and defaults to null)
-      const active = (data ?? []).find((m: any) => m.groups?.status === 'active') ?? null;
+      // Exclude left memberships and only return groups that are still active
+      const active = (data ?? []).find(
+        (m: any) => m.groups?.status === 'active' && m.status !== 'left',
+      ) ?? null;
       return { data: active, error: null };
     } catch (error) {
       return { data: null, error };
+    }
+  }
+
+  async recordPenaltyRpc(
+    groupId: string,
+    appPackage: string,
+    txHash?: string,
+  ): Promise<{ ok: boolean; error?: string; amount?: number }> {
+    try {
+      const { data, error } = await supabase.rpc('record_penalty', {
+        p_group_id:    groupId,
+        p_app_package: appPackage,
+        p_tx_hash:     txHash ?? null,
+      });
+      if (error) throw error;
+      return data as { ok: boolean; error?: string; amount?: number };
+    } catch (err: any) {
+      console.error('recordPenaltyRpc error:', err);
+      return { ok: false, error: err?.message ?? 'unknown' };
+    }
+  }
+
+  async forfeitStake(groupId: string): Promise<{ ok: boolean; error?: string; amount?: number }> {
+    try {
+      const { data, error } = await supabase.rpc('forfeit_stake', { p_group_id: groupId });
+      if (error) throw error;
+      return data as { ok: boolean; error?: string; amount?: number };
+    } catch (err: any) {
+      console.error('forfeitStake error:', err);
+      return { ok: false, error: err?.message ?? 'unknown' };
     }
   }
 }

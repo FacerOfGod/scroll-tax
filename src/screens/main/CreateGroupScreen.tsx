@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,11 +13,14 @@ import {
   Platform,
   Animated,
 } from 'react-native';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { xrplService } from '../../services/XrplService';
 import { useAuth } from '../../services/AuthContext';
 import { groupService } from '../../services/GroupService';
+import { ScrollDetectionService } from '../../services/ScrollDetectionService';
 import * as Keychain from 'react-native-keychain';
+import { treasuryService } from '../../services/TreasuryService';
 
 const ALL_APPS = [
   { id: 'com.zhiliaoapp.musically', label: 'TikTok' },
@@ -27,6 +30,8 @@ const ALL_APPS = [
 ];
 
 const CreateGroupScreen = ({ navigation }: any) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [deposit, setDeposit] = useState('10');
@@ -63,6 +68,19 @@ const CreateGroupScreen = ({ navigation }: any) => {
   };
 
   const handleCreateGroup = async () => {
+    const hasAccess = await ScrollDetectionService.hasUsageAccess();
+    if (!hasAccess) {
+      Alert.alert(
+        'Permission Required',
+        'ScrollTax needs App Usage Access to monitor your screen time. Grant it before creating a group.',
+        [
+          { text: 'Open Settings', onPress: () => ScrollDetectionService.openUsageAccessSettings() },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+      return;
+    }
+
     if (!name.trim()) {
       Alert.alert('Missing Name', 'Please enter a group name.');
       return;
@@ -94,9 +112,11 @@ const CreateGroupScreen = ({ navigation }: any) => {
 
       const seed = credentials.password;
 
-      // For XRP groups: send a self-transfer to mark the initial stake on testnet.
-      // For token groups: no on-chain transaction needed.
-      if (stakeType === 'xrp') {
+      // For XRP groups WITHOUT a configured treasury (dev), send a self-transfer
+      // that just marks the initial stake on testnet. When a treasury IS
+      // configured, the stake is deposited into it after the group exists (the
+      // deposit needs the group id) — see below. Token groups: no on-chain tx.
+      if (stakeType === 'xrp' && !treasuryService.address) {
         try {
           await xrplService.sendXrp(seed, user.address, deposit);
         } catch (xrplError: any) {
@@ -127,6 +147,20 @@ const CreateGroupScreen = ({ navigation }: any) => {
       if (error || !data?.id) {
         Alert.alert('Database Error', (error as Error)?.message || 'Could not save group.');
       } else {
+        // Deposit the creator's stake into the custodial treasury now that the
+        // group (and the auto-joined creator membership) exists.
+        if (stakeType === 'xrp' && treasuryService.address) {
+          try {
+            setStep('sending');
+            await treasuryService.deposit(seed, data.id, deposit);
+          } catch (depErr: any) {
+            Alert.alert(
+              'Stake Pending',
+              depErr?.message ||
+                'Group created, but the stake deposit did not confirm. You can retry the deposit from the group screen.',
+            );
+          }
+        }
         navigation.replace('GroupDashboard', { groupId: data.id });
       }
     } catch (e: any) {
@@ -167,7 +201,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Deep Work Warriors"
-                placeholderTextColor={Colors.textMuted}
+                placeholderTextColor={colors.textMuted}
                 value={name}
                 onChangeText={setName}
                 returnKeyType="next"
@@ -198,7 +232,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
                 <TextInput
                   style={styles.input}
                   placeholder="10"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                   value={deposit}
                   onChangeText={setDeposit}
@@ -232,7 +266,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
                   <TextInput
                     style={[styles.input, { flex: 1, borderWidth: 0 }]}
                     placeholder={durationUnit === 'days' ? '7' : durationUnit === 'hours' ? '24' : '30'}
-                    placeholderTextColor={Colors.textMuted}
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="number-pad"
                     value={duration}
                     onChangeText={setDuration}
@@ -249,7 +283,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.input}
                 placeholder="0.5"
-                placeholderTextColor={Colors.textMuted}
+                placeholderTextColor={colors.textMuted}
                 keyboardType="decimal-pad"
                 value={penalty}
                 onChangeText={setPenalty}
@@ -305,10 +339,10 @@ const CreateGroupScreen = ({ navigation }: any) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   content: {
     padding: 24,
@@ -318,10 +352,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 8,
     marginBottom: 32,
   },
   back: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontSize: 16,
   },
   titleWrap: {
@@ -333,7 +368,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   form: {
     gap: 20,
@@ -349,7 +384,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     marginLeft: 4,
@@ -362,10 +397,10 @@ const styles = StyleSheet.create({
   },
   unitToggle: {
     flexDirection: 'row',
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: colors.border,
     position: 'relative',
     padding: 2,
   },
@@ -373,7 +408,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 2,
     bottom: 2,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     borderRadius: 6,
   },
   unitBtn: {
@@ -384,7 +419,7 @@ const styles = StyleSheet.create({
   unitBtnText: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     letterSpacing: 0.5,
   },
   unitBtnTextActive: {
@@ -393,10 +428,10 @@ const styles = StyleSheet.create({
   inputWithSuffix: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: colors.border,
     height: 56,
     overflow: 'hidden',
   },
@@ -408,17 +443,17 @@ const styles = StyleSheet.create({
   },
   unitSuffixText: {
     fontSize: 15,
-    color: Colors.textMuted,
+    color: colors.textMuted,
   },
   input: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     height: 56,
     borderRadius: 14,
     paddingHorizontal: 16,
-    color: Colors.text,
+    color: colors.text,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: colors.border,
   },
   infoBox: {
     backgroundColor: 'rgba(255, 83, 0, 0.08)',
@@ -429,12 +464,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   infoTitle: {
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '700',
     fontSize: 14,
   },
   infoText: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -447,18 +482,18 @@ const styles = StyleSheet.create({
   },
   addressLabel: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   addressValue: {
     fontSize: 13,
-    color: Colors.primary,
+    color: colors.primary,
     fontFamily: 'monospace',
   },
   createButton: {
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     height: 58,
     borderRadius: 9999,
     justifyContent: 'center',
@@ -487,19 +522,19 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stakeTypeBtnActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   stakeTypeBtnText: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: colors.textMuted,
   },
   stakeTypeBtnTextActive: {
     color: '#FFFFFF',
@@ -515,17 +550,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   appChipSelected: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   appChipText: {
     fontSize: 14,
     fontWeight: '600',
-    color: Colors.textMuted,
+    color: colors.textMuted,
   },
   appChipTextSelected: {
     color: '#FFFFFF',

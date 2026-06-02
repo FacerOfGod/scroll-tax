@@ -16,20 +16,38 @@ const XRP_APP_NOT_OPEN_CODES = ['6e00', '6511', '6d00'];
 
 function derToRawSignature(derHex: string): string {
   const buf = Buffer.from(derHex, 'hex');
-  // buf[0] === 0x30 (SEQUENCE), buf[1] === total content length
+  // DER ECDSA signature: 0x30 <len> 0x02 <rLen> <r> 0x02 <sLen> <s>
+  if (buf.length < 8 || buf[0] !== 0x30) {
+    throw new Error('Malformed signature: bad SEQUENCE header');
+  }
   let offset = 2;
   // r integer
+  if (buf[offset] !== 0x02) {
+    throw new Error('Malformed signature: expected INTEGER for r');
+  }
   const rLen = buf[offset + 1];
   offset += 2;
+  if (rLen <= 0 || offset + rLen > buf.length) {
+    throw new Error('Malformed signature: bad r length');
+  }
   // DER pads positive integers with a leading 0x00 — strip it
   const rStart = rLen === 33 ? offset + 1 : offset;
   const rBytes = buf.slice(rStart, offset + rLen);
   offset += rLen;
   // s integer
+  if (buf[offset] !== 0x02) {
+    throw new Error('Malformed signature: expected INTEGER for s');
+  }
   const sLen = buf[offset + 1];
   offset += 2;
+  if (sLen <= 0 || offset + sLen > buf.length) {
+    throw new Error('Malformed signature: bad s length');
+  }
   const sStart = sLen === 33 ? offset + 1 : offset;
   const sBytes = buf.slice(sStart, offset + sLen);
+  if (rBytes.length > 32 || sBytes.length > 32) {
+    throw new Error('Malformed signature: r/s exceed 32 bytes');
+  }
   // Zero-pad r and s to 32 bytes each and concatenate
   const r = Buffer.alloc(32);
   const s = Buffer.alloc(32);
@@ -70,7 +88,7 @@ class LedgerService {
   async requestPermissions(): Promise<boolean> {
     if (Platform.OS !== 'android') return true;
 
-    const apiLevel = parseInt(Platform.Version as string, 10);
+    const apiLevel = parseInt(String(Platform.Version), 10);
 
     if (apiLevel >= 31) {
       const result = await PermissionsAndroid.requestMultiple([
@@ -100,11 +118,15 @@ class LedgerService {
    * Returns a cleanup function to stop scanning.
    */
   scanDevices(onDeviceFound: (device: LedgerDevice) => void): () => void {
-    const subscription = BleTransport.listen((event: any) => {
-      if (event.type === 'add' && event.descriptor) {
-        const { id, name } = event.descriptor;
-        onDeviceFound({ id, name: name ?? `Ledger (${id.slice(0, 6)})` });
-      }
+    const subscription = BleTransport.listen({
+      next: (event: any) => {
+        if (event.type === 'add' && event.descriptor) {
+          const { id, name } = event.descriptor;
+          onDeviceFound({ id, name: name ?? `Ledger (${id.slice(0, 6)})` });
+        }
+      },
+      error: () => {},
+      complete: () => {},
     });
     return () => subscription.unsubscribe();
   }

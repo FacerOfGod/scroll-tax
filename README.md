@@ -2,17 +2,18 @@
 
 > Turn screen-time guilt into crypto stakes. ScrollTax makes you and your group pay literally for doomscrolling.
 
-ScrollTax is a **React Native** mobile app + **Telegram bot** that gamifies digital wellness through financial accountability. Spend too long on TikTok, Instagram, or any banned app? Your staked crypto gets automatically transferred to your friend.
+ScrollTax is a **React Native** mobile app that gamifies digital wellness through financial accountability. Spend too long on TikTok, Instagram, or any banned app? Your staked crypto gets automatically transferred to your friends.
 
 ---
 
 ## How it works
 
-1. **Create or join a group** — stake XRP or use the Telegram bot to stake TON.
+1. **Create or join a group** — stake XRP with your friends.
 2. **Set your banned apps** — any app you want to scroll less on.
-3. **ScrollTax watches** — a native Android Accessibility Service detects scroll events in real time.
+3. **ScrollTax watches** — a native Android foreground service uses Usage Access to detect time spent in banned apps in real time.
 4. **Get penalized** — exceed your threshold and a penalty payment fires automatically to the other members of the group.
 5. **Win money** — The more your friends fail, the more money you make. But beware, the same goes for you.
+6. **Bet on yourself** — stake against personal goals (GitHub, Strava, Chess.com, LeetCode) via Connected Accounts.
 
 ---
 
@@ -21,35 +22,27 @@ ScrollTax is a **React Native** mobile app + **Telegram bot** that gamifies digi
 | Platform | Status |
 |---|---|
 | Android app (React Native) | ✅ Supported |
-| Telegram bot | ✅ Supported |
-| iOS | ⚠️ Not supported (AccessibilityService is Android-only) |
+| iOS | ⚠️ Not supported (Usage Access detection is Android-only) |
 
 ---
 
 ## Blockchain support
 
-ScrollTax supports two chains for staking and penalties:
-
 ### XRP Ledger (XRPL)
-- Network: Testnet (`wss://s.altnet.rippletest.net:51233`)
+- Network: configurable via `XRPL_NETWORK` (`testnet` default, or `mainnet`); testnet is `wss://s.altnet.rippletest.net:51233`
 - SDK: `xrpl` v4.6
 - Wallet seeds stored securely via `react-native-keychain`
 - The group creator's XRPL address acts as the group treasury
-
-### TON (The Open Network)
-- Native integration via the Telegram bot @scrolltaxbot
-- TON wallets used for staking and penalty transactions within Telegram groups
-- Enables zero-friction onboarding for Telegram-native users
+- Optional hardware-wallet signing via Ledger (BLE)
 
 ---
 
 ## Tech stack
 
 - **Frontend:** React Native 0.84.1 + TypeScript + React Navigation
-- **Telegram bot:** TON-integrated bot for group creation and penalty tracking
-- **Blockchain:** XRPL + TON
-- **Backend:** Supabase (PostgreSQL + Auth + Row-Level Security)
-- **Native (Android):** Kotlin `AccessibilityService` for real-time scroll detection
+- **Blockchain:** XRPL
+- **Backend:** Supabase (PostgreSQL + Auth + Row-Level Security + Edge Functions)
+- **Native (Android):** Kotlin foreground service using Usage Access for real-time app detection
 - **Secure storage:** `react-native-keychain`
 
 ---
@@ -86,9 +79,9 @@ bundle exec pod install
 npm run ios
 ```
 
-### Step 3: Enable the Accessibility Service
+### Step 3: Grant Usage Access
 
-On your Android device, go to **Settings → App Usage** and enable the ScrollTax service to allow scroll detection on banned apps.
+On your Android device, go to **Settings → App Usage** (or use the in-app prompt) and grant ScrollTax Usage Access so it can detect time spent in banned apps.
 
 ---
 
@@ -113,5 +106,4 @@ ScrollTax/
 ## Troubleshooting
 
 - [React Native Troubleshooting](https://reactnative.dev/docs/troubleshooting)
-- If the penalty doesn't fire, make sure the Accessibility Service is enabled and the app is in your banned-apps list.
-- If TON transactions fail with error 429, it is highly due to the TonCenter free plan limits.
+- If the penalty doesn't fire, make sure Usage Access is granted and the app is in your banned-apps list.

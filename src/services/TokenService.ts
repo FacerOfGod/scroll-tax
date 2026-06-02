@@ -20,44 +20,26 @@ class TokenService {
     return data.tokens as number;
   }
 
-  /** Deduct tokens. Throws if the user has insufficient balance. */
-  async deductTokens(userId: string, amount: number): Promise<void> {
-    const current = await this.getBalance(userId);
-    if (current < amount) {
-      throw new Error(`Insufficient tokens. You have ${current} but need ${amount}.`);
-    }
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({ tokens: current - amount })
-      .eq('user_id', userId);
-    if (error) throw new Error(error.message);
-  }
-
-  /** Add tokens to a user's balance. */
-  async addTokens(userId: string, amount: number): Promise<void> {
-    const current = await this.getBalance(userId);
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({ tokens: current + amount })
-      .eq('user_id', userId);
-    if (error) throw new Error(error.message);
-  }
-
   /**
-   * Deduct a penalty from the offender and split it equally among other members.
-   * If there are no other members, tokens are simply burned (deducted with no recipient).
+   * Atomically deduct tokens from the signed-in user. Throws if the balance is
+   * insufficient. The server-side adjust_tokens RPC enforces the guard in a
+   * single statement, eliminating the read-then-write race. The userId arg is
+   * advisory — the RPC always acts on auth.uid().
    */
-  async redistributePenalty(
-    fromUserId: string,
-    toUserIds: string[],
-    penaltyAmount: number,
-  ): Promise<void> {
-    await this.deductTokens(fromUserId, penaltyAmount);
+  async deductTokens(_userId: string, amount: number): Promise<void> {
+    const { error } = await supabase.rpc('adjust_tokens', { p_delta: -amount });
+    if (error) {
+      if (error.message?.includes('insufficient')) {
+        throw new Error(`Insufficient tokens for this stake (need ${amount}).`);
+      }
+      throw new Error(error.message);
+    }
+  }
 
-    if (toUserIds.length === 0) return;
-
-    const share = Math.floor((penaltyAmount / toUserIds.length) * 1e6) / 1e6;
-    await Promise.all(toUserIds.map(uid => this.addTokens(uid, share)));
+  /** Atomically add tokens to the signed-in user's balance. */
+  async addTokens(_userId: string, amount: number): Promise<void> {
+    const { error } = await supabase.rpc('adjust_tokens', { p_delta: amount });
+    if (error) throw new Error(error.message);
   }
 }
 

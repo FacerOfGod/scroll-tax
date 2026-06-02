@@ -13,12 +13,15 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../services/AuthContext';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import Logo from '../../components/Logo';
 
 const SignupScreen = ({ navigation }: any) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -114,7 +117,7 @@ const SignupScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.input}
                 placeholder="you@example.com"
-                placeholderTextColor={Colors.textMuted}
+                placeholderTextColor={colors.textMuted}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -130,7 +133,7 @@ const SignupScreen = ({ navigation }: any) => {
               <TextInput
                 style={styles.input}
                 placeholder="Min. 6 characters"
-                placeholderTextColor={Colors.textMuted}
+                placeholderTextColor={colors.textMuted}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -142,7 +145,7 @@ const SignupScreen = ({ navigation }: any) => {
 
             {isSubmitting && (
               <View style={styles.progressBox}>
-                <ActivityIndicator color={Colors.primary} size="small" />
+                <ActivityIndicator color={colors.primary} size="small" />
                 <Text style={styles.progressText}>{getButtonLabel()}</Text>
               </View>
             )}
@@ -179,10 +182,10 @@ const SignupScreen = ({ navigation }: any) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   content: {
     flexGrow: 1,
@@ -199,12 +202,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 30,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 15,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 8,
     lineHeight: 22,
   },
@@ -218,20 +221,20 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginLeft: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     height: 56,
     borderRadius: 14,
     paddingHorizontal: 16,
-    color: Colors.text,
+    color: colors.text,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.7)',
+    borderColor: colors.border,
   },
   progressBox: {
     flexDirection: 'row',
@@ -244,18 +247,18 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 83, 0, 0.2)',
   },
   progressText: {
-    color: Colors.primary,
+    color: colors.primary,
     fontSize: 14,
     fontWeight: '600',
   },
   primaryButton: {
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     height: 58,
     borderRadius: 9999,
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 4,
-    shadowColor: Colors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -271,15 +274,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   infoRow: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.5)',
+    borderColor: colors.border,
   },
   infoText: {
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     lineHeight: 18,
     textAlign: 'center',
   },
@@ -291,15 +294,15 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
   },
   backArrow: {
     fontSize: 32,
-    color: Colors.text,
+    color: colors.text,
     fontWeight: '200',
     lineHeight: 36,
     marginTop: -2,
@@ -310,11 +313,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   footerText: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontSize: 15,
   },
   footerLink: {
-    color: Colors.primary,
+    color: colors.primary,
     fontSize: 15,
     fontWeight: '700',
   },

@@ -41,7 +41,7 @@ class ScrollDetectionService : Service() {
         serviceStartTime = System.currentTimeMillis()
         handler.post(pollRunnable)
         Log.d("ScrollDetection", "Monitoring service started")
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -72,7 +72,6 @@ class ScrollDetectionService : Service() {
                 ScrollDetectionModule.emitScrollEvent(foreground)
                 if (elapsedSeconds >= getThresholdSeconds()) {
                     val mins = (elapsedSeconds / 60).toInt().coerceAtLeast(1)
-                    insertTelegramDeduction(foreground)
                     ScrollDetectionModule.emitPenaltyEvent(foreground, mins)
                     penaltyStartTime = now
                     Log.d("ScrollDetection", "Penalty fired for $foreground (${elapsedSeconds}s)")
@@ -88,28 +87,36 @@ class ScrollDetectionService : Service() {
     }
 
     /**
-     * Scans ALL UsageEvents from service start to now and replays foreground/background
-     * transitions to determine the current foreground app accurately.
-     * No fixed window = no staleness from queryUsageStats, no missed events from short windows.
+     * Returns the current foreground app by replaying UsageEvents over the last 60 seconds.
+     * Tracks the most recent event per package; the foreground app is the one whose last
+     * event is MOVE_TO_FOREGROUND with no subsequent MOVE_TO_BACKGROUND.
+     * This is more accurate than queryUsageStats whose lastTimeUsed lags several seconds
+     * after the user leaves an app.
      */
     private fun getForegroundApp(): String? {
         return try {
             val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val now = System.currentTimeMillis()
-            val events = usm.queryEvents(serviceStartTime, now)
+            val events = usm.queryEvents(now - 60_000, now)
             val event = UsageEvents.Event()
-            var current: String? = null
+            // For each package, keep only the most recent event (type + timestamp)
+            val lastEvent = mutableMapOf<String, Pair<Int, Long>>()
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                when (event.eventType) {
-                    UsageEvents.Event.MOVE_TO_FOREGROUND -> current = event.packageName
-                    UsageEvents.Event.MOVE_TO_BACKGROUND -> {
-                        if (current == event.packageName) current = null
-                    }
+                val prev = lastEvent[event.packageName]
+                if (prev == null || event.timeStamp > prev.second) {
+                    lastEvent[event.packageName] = Pair(event.eventType, event.timeStamp)
                 }
             }
-            Log.d("ScrollDetection", "Current foreground: $current")
-            current
+            // The foreground app is the one whose most-recent event is MOVE_TO_FOREGROUND
+            val foreground = lastEvent
+                .filter { (pkg, pair) ->
+                    pkg != packageName && pair.first == UsageEvents.Event.MOVE_TO_FOREGROUND
+                }
+                .maxByOrNull { (_, pair) -> pair.second }
+                ?.key
+            Log.d("ScrollDetection", "Current foreground: $foreground")
+            foreground
         } catch (e: Exception) {
             Log.w("ScrollDetection", "getForegroundApp error: ${e.message}")
             null
@@ -118,46 +125,24 @@ class ScrollDetectionService : Service() {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun insertTelegramDeduction(pkg: String) {
-        val prefs   = getSharedPreferences("ScrollTaxPrefs", Context.MODE_PRIVATE)
-        val url     = prefs.getString("tg_url", null)   ?: return
-        val key     = prefs.getString("tg_key", null)   ?: return
-        val token   = prefs.getString("tg_token", null) ?: return
-        val tid     = prefs.getString("tg_tid", null)   ?: return
-        val sid     = prefs.getString("tg_sid", null)   ?: return
-        val amount  = prefs.getFloat("tg_amount", 0.5f)
-        val appName = friendlyName(pkg)
-        Thread {
-            try {
-                val conn = java.net.URL("$url/rest/v1/deductions")
-                    .openConnection() as java.net.HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.setRequestProperty("apikey", key)
-                conn.setRequestProperty("Authorization", "Bearer $token")
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("Prefer", "return=minimal")
-                conn.connectTimeout = 10_000
-                conn.readTimeout    = 10_000
-                conn.doOutput       = true
-                val body = """{"session_id":"$sid","telegram_id":"$tid","amount":$amount,"app_name":"$appName"}"""
-                conn.outputStream.use { it.write(body.toByteArray()) }
-                Log.d("ScrollDetection", "Telegram deduction HTTP ${conn.responseCode} for $pkg")
-                conn.disconnect()
-            } catch (e: Exception) {
-                Log.e("ScrollDetection", "Telegram deduction failed: ${e.message}")
-            }
-        }.start()
-    }
-
     private fun isDistractionApp(pkg: String): Boolean {
         val prefs = getSharedPreferences("ScrollTaxPrefs", Context.MODE_PRIVATE)
-        val banned = prefs.getStringSet("bannedApps", setOf(
-            "com.zhiliaoapp.musically",
-            "com.instagram.android",
-            "com.google.android.youtube",
-            "com.whatsapp"
-        ))
-        return banned?.contains(pkg) ?: false
+        // Use null as default to distinguish "key never set" from "key set to empty set".
+        // If the key was written as {} by old buggy JS code, stored is non-null but empty,
+        // and we fall back to the built-in defaults so detection is never silently disabled.
+        val stored = prefs.getStringSet("bannedApps", null)
+        val banned = if (stored.isNullOrEmpty()) {
+            setOf(
+                "com.zhiliaoapp.musically",
+                "com.instagram.android",
+                "com.google.android.youtube",
+                "com.whatsapp"
+            )
+        } else {
+            stored
+        }
+        Log.d("ScrollDetection", "isDistractionApp($pkg) banned=$banned → ${banned.contains(pkg)}")
+        return banned.contains(pkg)
     }
 
     private fun getThresholdSeconds(): Long {

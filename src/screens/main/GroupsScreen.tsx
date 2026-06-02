@@ -19,12 +19,15 @@ import { groupService } from '../../services/GroupService';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { MainStackParamList } from '../../types/navigation';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 
 type NavigationProp = StackNavigationProp<MainStackParamList, 'Groups'>;
 
 export default function GroupsScreen() {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const { user } = useAuth();
   const navigation = useNavigation<NavigationProp>();
   const isFocused = useIsFocused();
@@ -59,11 +62,13 @@ export default function GroupsScreen() {
     listAnim.setValue(0);
     const { data, error } = await groupService.fetchGroups(user!.id);
     if (!error && data) {
-      const formatted = data.map((item: any) => ({
-        ...(item.groups as any),
-        myStakedAmount: item.staked_amount,
-        myPenalties: item.penalties_incurred,
-      }));
+      const formatted = data
+        .filter((item: any) => item.groups != null)
+        .map((item: any) => ({
+          ...(item.groups as any),
+          myStakedAmount: item.staked_amount,
+          myPenalties: item.penalties_incurred,
+        }));
       formatted.sort((a: any, b: any) => {
         if (a.status === b.status) return 0;
         return a.status === 'active' ? -1 : 1;
@@ -84,7 +89,7 @@ export default function GroupsScreen() {
     if (!code) return;
     setJoinModalVisible(false);
     setInviteCode('');
-    const { data, error } = await groupService.fetchGroups(user!.id);
+    const { data } = await groupService.fetchGroups(user!.id);
     // Navigate to group dashboard if the invite code matches a group id
     const matched = (data as any[])?.find((m: any) => m.groups?.id === code || m.groups?.invite_code === code);
     if (matched) {
@@ -131,7 +136,7 @@ export default function GroupsScreen() {
           </View>
           <View style={styles.cardStatDivider} />
           <View style={styles.cardStat}>
-            <Text style={[styles.cardStatValue, (item.myPenalties ?? 0) > 0 && { color: Colors.error }]}>
+            <Text style={[styles.cardStatValue, (item.myPenalties ?? 0) > 0 && { color: colors.error }]}>
               {item.myPenalties ?? 0}
             </Text>
             <Text style={styles.cardStatLabel}>Penalties XRP</Text>
@@ -164,13 +169,13 @@ export default function GroupsScreen() {
 
       {loading && !refreshing ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
         <Animated.ScrollView
           contentContainerStyle={styles.listContainer}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
           }
           showsVerticalScrollIndicator={false}
           style={{ opacity: listAnim }}
@@ -242,7 +247,7 @@ export default function GroupsScreen() {
             <TextInput
               style={styles.modalInput}
               placeholder="Invite code"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={inviteCode}
               onChangeText={setInviteCode}
               autoCapitalize="none"
@@ -270,25 +275,22 @@ export default function GroupsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: 24,
+    paddingTop: 24,
     paddingBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
   },
   backButton: {
-    color: Colors.primary,
+    color: colors.textMuted,
     fontSize: 16,
-    fontWeight: '600',
   },
   headerTitleWrap: {
     position: 'absolute',
@@ -297,9 +299,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -0.2,
   },
   centered: {
@@ -312,11 +314,11 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   groupCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 18,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
@@ -334,7 +336,7 @@ const styles = StyleSheet.create({
   groupName: {
     fontSize: 17,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     flex: 1,
     marginRight: 8,
     letterSpacing: -0.2,
@@ -354,17 +356,17 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.secondary,
+    color: colors.secondary,
     textTransform: 'capitalize',
     letterSpacing: 0.3,
   },
   statusTextEnded: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
   },
   cardStats: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(42, 42, 42, 0.5)',
+    borderTopColor: colors.border,
     paddingVertical: 12,
     paddingHorizontal: 16,
   },
@@ -378,23 +380,23 @@ const styles = StyleSheet.create({
   cardStatValue: {
     fontSize: 18,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
   },
   cardStatLabel: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
   cardStatDivider: {
     width: 1,
-    backgroundColor: 'rgba(42, 42, 42, 0.5)',
+    backgroundColor: colors.border,
     marginHorizontal: 4,
   },
   cardArrow: {
     fontSize: 26,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     alignSelf: 'center',
     marginLeft: 'auto',
     paddingRight: 4,
@@ -409,16 +411,16 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 48,
-    color: Colors.primary,
+    color: colors.primary,
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   emptyText: {
     fontSize: 15,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -426,13 +428,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 32,
     right: 24,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     width: 58,
     height: 58,
     borderRadius: 29,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primary,
+    shadowColor: colors.primary,
     shadowOpacity: 0.45,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 5 },
@@ -448,14 +450,14 @@ const styles = StyleSheet.create({
   sectionHeader: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.secondary,
+    color: colors.secondary,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 10,
     marginTop: 4,
   },
   sectionHeaderMuted: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 20,
   },
   emptyActions: {
@@ -464,7 +466,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   emptyBtnPrimary: {
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
@@ -476,13 +478,13 @@ const styles = StyleSheet.create({
   },
   emptyBtnSecondary: {
     borderWidth: 1.5,
-    borderColor: Colors.primary,
+    borderColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
   },
   emptyBtnSecondaryText: {
-    color: Colors.primary,
+    color: colors.primary,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -495,7 +497,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   modalCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 20,
     padding: 24,
     width: '100%',
@@ -504,22 +506,22 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   modalSubtitle: {
     fontSize: 14,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     lineHeight: 20,
   },
   modalInput: {
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
-    color: Colors.text,
+    color: colors.text,
     borderWidth: 1,
-    borderColor: 'rgba(42,42,42,0.6)',
+    borderColor: colors.border,
     marginTop: 4,
   },
   modalActions: {
@@ -530,19 +532,19 @@ const styles = StyleSheet.create({
   modalBtnCancel: {
     flex: 1,
     borderWidth: 1,
-    borderColor: 'rgba(42,42,42,0.6)',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
   },
   modalBtnCancelText: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontSize: 15,
     fontWeight: '600',
   },
   modalBtnJoin: {
     flex: 1,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',

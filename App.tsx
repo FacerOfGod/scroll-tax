@@ -1,16 +1,14 @@
-import React, {useEffect} from 'react';
+import React from 'react';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import RootNavigator from './src/navigation/RootNavigator';
-import {localNotificationService} from './src/services/LocalNotificationService';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 function App() {
-  useEffect(() => {
-    localNotificationService.configure();
-  }, []);
-
   return (
     <GestureHandlerRootView style={{flex: 1}}>
-      <RootNavigator />
+      <ErrorBoundary>
+        <RootNavigator />
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }

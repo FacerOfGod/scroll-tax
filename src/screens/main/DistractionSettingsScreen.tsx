@@ -1,17 +1,20 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
+  Switch,
   AppState,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { ScrollDetectionService } from '../../services/ScrollDetectionService';
 
 export default function DistractionSettingsScreen({ navigation }: any) {
+  const { isDark, toggleTheme, colors } = useTheme();
   const [hasUsage, setHasUsage] = useState<boolean | null>(null);
 
   const checkUsage = useCallback(() => {
@@ -27,6 +30,8 @@ export default function DistractionSettingsScreen({ navigation }: any) {
     });
     return () => sub.remove();
   }, [checkUsage]);
+
+  const styles = createStyles(colors);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -44,6 +49,26 @@ export default function DistractionSettingsScreen({ navigation }: any) {
       </View>
 
       <View style={styles.content}>
+        {/* Appearance section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Appearance</Text>
+          <Text style={styles.helperText}>Switch between light and dark mode.</Text>
+
+          <View style={styles.permissionRow}>
+            <View style={styles.permissionInfo}>
+              <Text style={styles.permissionName}>Dark Mode</Text>
+              <Text style={styles.permissionDesc}>Toggle light / dark theme</Text>
+            </View>
+            <Switch
+              value={isDark}
+              onValueChange={toggleTheme}
+              trackColor={{ false: colors.border, true: colors.primary }}
+              thumbColor={colors.text}
+            />
+          </View>
+        </View>
+
+        {/* Required Permissions section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Required Permissions</Text>
           <Text style={styles.helperText}>
@@ -69,7 +94,7 @@ export default function DistractionSettingsScreen({ navigation }: any) {
               onPress={() => ScrollDetectionService.openUsageAccessSettings()}
               activeOpacity={0.8}
             >
-              <Text style={styles.permissionButtonText}>Enable Usage Access ></Text>
+              <Text style={styles.permissionButtonText}>Enable Usage Access {'>'}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -78,25 +103,22 @@ export default function DistractionSettingsScreen({ navigation }: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: 24,
+    paddingTop: 24,
     paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
   },
   back: {
-    color: Colors.primary,
+    color: colors.textMuted,
     fontSize: 16,
-    fontWeight: '600',
   },
   titleWrap: {
     position: 'absolute',
@@ -105,9 +127,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   content: {
     padding: 20,
@@ -119,22 +141,22 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   helperText: {
     fontSize: 13,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     lineHeight: 20,
   },
   permissionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     padding: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: colors.border,
   },
   permissionInfo: {
     flex: 1,
@@ -143,11 +165,11 @@ const styles = StyleSheet.create({
   permissionName: {
     fontSize: 15,
     fontWeight: '600',
-    color: Colors.text,
+    color: colors.text,
   },
   permissionDesc: {
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
   },
   badge: {
     paddingHorizontal: 10,
@@ -169,10 +191,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   badgeTextOn: {
-    color: Colors.secondary,
+    color: colors.secondary,
   },
   badgeTextOff: {
-    color: Colors.error,
+    color: colors.error,
   },
   permissionButton: {
     backgroundColor: 'rgba(255, 83, 0, 0.1)',
@@ -183,7 +205,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   permissionButtonText: {
-    color: Colors.primary,
+    color: colors.primary,
     fontSize: 14,
     fontWeight: '700',
   },

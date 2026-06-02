@@ -49,14 +49,12 @@ export const ScrollDetectionService = {
   getPendingPenalties: (): Promise<string> =>
     ScrollDetection?.getPendingPenalties?.() ?? Promise.resolve(''),
 
-  setTelegramContext: (
-    supabaseUrl: string,
-    supabaseKey: string,
-    accessToken: string,
-    telegramId: string,
-    sessionId: string,
-    amount: number,
-  ) => {
-    ScrollDetection?.setTelegramContext?.(supabaseUrl, supabaseKey, accessToken, telegramId, sessionId, amount);
+  /**
+   * Registers the XRPL wallet seed with the native module so it can
+   * HMAC-sign the offline pending-penalty queue. Call once on app mount
+   * after loading the seed from Keychain.
+   */
+  setXrplSeed: (seed: string): void => {
+    ScrollDetection?.setXrplSeed?.(seed);
   },
 };

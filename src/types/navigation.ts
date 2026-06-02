@@ -5,4 +5,7 @@ export type MainStackParamList = {
   CreateGroup: undefined;
   DistractionSettings: undefined;
   CryptoGuide: undefined;
+  SelfBets: undefined;
+  CreateSelfBet: undefined;
+  ConnectedAccounts: undefined;
 };

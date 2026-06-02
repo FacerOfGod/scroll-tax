@@ -1,20 +1,30 @@
 import { Client, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
 import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
+import { XRPL_NETWORK } from '@env';
 
 // @ts-ignore
 global.Buffer = Buffer;
 
-const TESTNET_URL = 'wss://s.altnet.rippletest.net:51233';
+// Network selection. Defaults to testnet when XRPL_NETWORK is unset or unknown,
+// so existing behavior is preserved unless mainnet is explicitly opted into.
+const XRPL_ENDPOINTS = {
+  testnet: 'wss://s.altnet.rippletest.net:51233',
+  mainnet: 'wss://xrplcluster.com',
+} as const;
 
-// XRPL uses seconds since Jan 1, 2000 — Unix epoch starts Jan 1, 1970
-const RIPPLE_EPOCH_OFFSET = 946684800;
+type XrplNetwork = keyof typeof XRPL_ENDPOINTS;
+
+const NETWORK: XrplNetwork = XRPL_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+const XRPL_WSS_URL = XRPL_ENDPOINTS[NETWORK];
 
 class XrplService {
   client: Client;
+  readonly network: XrplNetwork = NETWORK;
+  readonly isMainnet: boolean = NETWORK === 'mainnet';
 
   constructor() {
-    this.client = new Client(TESTNET_URL);
+    this.client = new Client(XRPL_WSS_URL);
   }
 
   async ensureConnected() {
@@ -47,6 +57,9 @@ class XrplService {
    * Returns the funded wallet with the new balance.
    */
   async fundTestnetWallet(seed: string): Promise<{ balance: number }> {
+    if (this.isMainnet) {
+      throw new Error('Testnet faucet is unavailable on mainnet.');
+    }
     await this.ensureConnected();
     const wallet = Wallet.fromSeed(seed);
     const result = await this.client.fundWallet(wallet);
@@ -61,7 +74,7 @@ class XrplService {
     try {
       await this.ensureConnected();
       const balance = await this.client.getXrpBalance(address);
-      return balance;
+      return String(balance);
     } catch (error: any) {
       // Account not yet funded on testnet
       if (error?.data?.error === 'actNotFound' || error?.message?.includes('actNotFound')) {
@@ -76,25 +89,65 @@ class XrplService {
    * Send XRP from one wallet to another.
    * Used for group deposits and penalty payments.
    */
-  async sendXrp(seed: string, destination: string, amount: string): Promise<any> {
+  // Result codes that are transient — a fresh autofill + resubmit may succeed.
+  // Fatal codes (insufficient funds, bad destination, etc.) are NOT listed here
+  // and will propagate immediately without retry.
+  private static RETRYABLE_RESULTS = new Set([
+    'telINSUF_FEE_P',  // fee too low (network congestion) — re-autofill recalculates
+    'tooBusy',         // rippled server overloaded
+    'terQUEUED',       // already queued, try again after a ledger
+    'tefPAST_SEQ',     // sequence conflict from parallel submissions — re-autofill fixes
+    'terPRE_SEQ',      // sequence gap — wait and retry
+  ]);
+
+  async sendXrp(seed: string, destination: string, amount: string, maxRetries = 3): Promise<any> {
     await this.ensureConnected();
     const wallet = Wallet.fromSeed(seed);
 
-    const prepared = await this.client.autofill({
-      TransactionType: 'Payment',
-      Account: wallet.address,
-      Amount: xrpToDrops(amount),
-      Destination: destination,
-    });
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff: 1s, 2s, 4s — silent, no user-visible noise
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+        await this.ensureConnected();
+      }
 
-    const signed = wallet.sign(prepared);
-    const tx = await this.client.submitAndWait(signed.tx_blob);
+      try {
+        const prepared = await this.client.autofill({
+          TransactionType: 'Payment',
+          Account: wallet.address,
+          Amount: xrpToDrops(amount),
+          Destination: destination,
+        });
 
-    if ((tx.result.meta as any)?.TransactionResult !== 'tesSUCCESS') {
-      throw new Error(`Transaction failed: ${(tx.result.meta as any)?.TransactionResult}`);
+        const signed = wallet.sign(prepared);
+        const tx = await this.client.submitAndWait(signed.tx_blob);
+        const txResult: string = (tx.result.meta as any)?.TransactionResult;
+
+        if (txResult === 'tesSUCCESS') {
+          return tx;
+        }
+
+        if (XrplService.RETRYABLE_RESULTS.has(txResult) && attempt < maxRetries) {
+          lastError = new Error(`Transaction failed: ${txResult}`);
+          continue;
+        }
+
+        throw new Error(`Transaction failed: ${txResult}`);
+      } catch (err: any) {
+        const msg: string = err?.message ?? '';
+        // Retry on network/connection errors (not XRPL result codes)
+        const isNetworkError =
+          msg.includes('connect') || msg.includes('socket') || msg.includes('timeout');
+        if (isNetworkError && attempt < maxRetries) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
     }
 
-    return tx;
+    throw lastError ?? new Error('Transaction failed after retries');
   }
 
   /**
@@ -119,7 +172,7 @@ class XrplService {
    * Converts a drops string to XRP display string.
    */
   dropsToXrp(drops: string): string {
-    return dropsToXrp(drops);
+    return String(dropsToXrp(drops));
   }
 }
 

@@ -9,7 +9,8 @@ import {
   Animated,
   Alert,
 } from 'react-native';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 import { useAuth } from '../../services/AuthContext';
 import Logo from '../../components/Logo';
@@ -22,6 +23,8 @@ const FEATURES = [
 ];
 
 const OnboardingScreen = ({ navigation }: any) => {
+  const { colors, isDark } = useTheme();
+  const styles = createStyles(colors);
   const { signInWithGoogle } = useAuth();
   const logoAnim     = useEntranceAnimation(0);
   const feature0Anim = useEntranceAnimation(120);
@@ -34,7 +37,7 @@ const OnboardingScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
 
       <View style={styles.content}>
         {/* Logo */}
@@ -109,10 +112,10 @@ const OnboardingScreen = ({ navigation }: any) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   content: {
     flex: 1,
@@ -132,11 +135,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -153,7 +156,7 @@ const styles = StyleSheet.create({
   },
   featureIcon: {
     fontSize: 28,
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '700',
   },
   featureText: {
@@ -162,12 +165,12 @@ const styles = StyleSheet.create({
   featureTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -0.2,
   },
   featureDesc: {
     fontSize: 13,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 2,
     lineHeight: 18,
   },
@@ -175,12 +178,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   primaryButton: {
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     height: 48,
     borderRadius: 9999,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Colors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 10,
@@ -198,13 +201,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontSize: 14,
     fontWeight: '500',
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: colors.border,
     marginVertical: 2,
   },
   googleButton: {
@@ -216,7 +219,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,

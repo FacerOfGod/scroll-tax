@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Colors } from '../theme/colors';
+import { ColorScheme } from '../theme/colors';
+import { useTheme } from '../context/ThemeContext';
 
 type LogoSize = 'sm' | 'md' | 'lg';
 type LogoDirection = 'vertical' | 'horizontal';
@@ -24,6 +25,8 @@ const Logo: React.FC<LogoProps> = ({
   showTagline = false,
   direction = 'vertical',
 }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const c = CONFIGS[size];
   const isHorizontal = direction === 'horizontal';
 
@@ -66,7 +69,7 @@ const Logo: React.FC<LogoProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   wrapper: {
     alignItems: 'center',
   },
@@ -79,17 +82,17 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
   },
   wordmarkScroll: {
-    color: Colors.text,
+    color: colors.text,
   },
   wordmarkTax: {
-    color: Colors.primary,
+    color: colors.primary,
   },
   wordmarkDot: {
-    color: Colors.primary,
+    color: colors.primary,
     opacity: 0.5,
   },
   tagline: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 6,
     textAlign: 'center',
   },

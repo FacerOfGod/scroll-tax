@@ -12,6 +12,22 @@ export const Colors = {
   glass: 'rgba(17, 17, 17, 0.8)',
 };
 
+export const LightColors = {
+  primary: '#FF5300',
+  secondary: '#25A046',
+  error: '#D93025',
+  warning: '#E08B00',
+  background: '#FFFFFF',
+  surface: '#F2F2F7',
+  text: '#000000',
+  textMuted: '#8E8E93',
+  border: '#E5E5EA',
+  accent: '#FF5300',
+  glass: 'rgba(242, 242, 247, 0.8)',
+};
+
+export type ColorScheme = typeof Colors;
+
 export const Gradients = {
   primary: ['#FF5300', '#FF7A30'],
   success: ['#30D158', '#25A046'],

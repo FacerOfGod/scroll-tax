@@ -14,27 +14,31 @@ import {
   Platform,
   Animated,
   AppState,
-  Linking,
   Modal,
   FlatList,
   TextInput,
   LayoutAnimation,
   UIManager,
+  KeyboardAvoidingView,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../services/AuthContext';
-import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../services/supabaseClient';
+import { supabase } from '../../services/supabaseClient';
 import { xrplService } from '../../services/XrplService';
 import { ledgerService } from '../../services/LedgerService';
 import { groupService } from '../../services/GroupService';
-import { tokenService } from '../../services/TokenService';
 import { ScrollDetectionService } from '../../services/ScrollDetectionService';
 import * as Keychain from 'react-native-keychain';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
-import { PENDING_INVITE_KEY, PENDING_TELEGRAM_KEY, PENDING_SESSION_KEY } from '../../navigation/RootNavigator';
+import { PENDING_INVITE_KEY } from '../../navigation/RootNavigator';
 import Logo from '../../components/Logo';
+import InAppNotification from '../../components/InAppNotification';
+import { HOUSE_WALLET } from '@env';
+import { splitDrops, xrpToDropsInt, dropsToXrpString } from '../../utils/penaltySplit';
+import { treasuryService } from '../../services/TreasuryService';
 
 // ─── Animated Number ──────────────────────────────────────────────────────────
 
@@ -107,6 +111,8 @@ const MiniPriceChart = React.memo(({
   currentPrice: number;
   currency: string;
 }) => {
+  const { colors } = useTheme();
+  const miniChartStyles = createMiniChartStyles(colors);
   const [chartWidth, setChartWidth] = useState(0);
   const isUp = change24h >= 0;
 
@@ -144,11 +150,11 @@ const MiniPriceChart = React.memo(({
           <AnimatedNumber
             value={Math.abs(change24h)}
             decimals={2}
-            style={[miniChartStyles.badgeText, { color: isUp ? Colors.secondary : Colors.error }]}
+            style={[miniChartStyles.badgeText, { color: isUp ? colors.secondary : colors.error }]}
             prefix={isUp ? '+' : '−'}
             suffix="%"
           />
-          <Text style={[miniChartStyles.badgeLabel, { color: isUp ? Colors.secondary : Colors.error }]}>
+          <Text style={[miniChartStyles.badgeLabel, { color: isUp ? colors.secondary : colors.error }]}>
             24h
           </Text>
         </View>
@@ -195,7 +201,7 @@ const MiniPriceChart = React.memo(({
                     top:  pt.y + dy / 2 - 1,
                     width: len,
                     height: 2,
-                    backgroundColor: Colors.primary,
+                    backgroundColor: colors.primary,
                     borderRadius: 1,
                     transform: [{ rotate: `${angle}deg` }],
                   }}
@@ -224,7 +230,7 @@ const MiniPriceChart = React.memo(({
                     width: 8,
                     height: 8,
                     borderRadius: 4,
-                    backgroundColor: Colors.primary,
+                    backgroundColor: colors.primary,
                   }} />
                 </>
               );
@@ -236,12 +242,12 @@ const MiniPriceChart = React.memo(({
   );
 });
 
-const miniChartStyles = StyleSheet.create({
+const createMiniChartStyles = (colors: ColorScheme) => StyleSheet.create({
   card: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     padding: 16,
     marginBottom: 28,
     shadowColor: '#000',
@@ -259,14 +265,14 @@ const miniChartStyles = StyleSheet.create({
   pair: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   price: {
     fontSize: 22,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     marginTop: 3,
     letterSpacing: -0.5,
   },
@@ -299,6 +305,8 @@ const WAVE_AMP    = 12;
 const WAVE_PERIOD = 650; // ms per full cycle
 
 const PixelWave = React.memo(({ active }: { active: boolean }) => {
+  const { colors } = useTheme();
+  const waveStyles = createWaveStyles(colors);
   const anims      = useRef(
     Array.from({ length: WAVE_COLS }, () => new Animated.Value(0)),
   ).current;
@@ -370,7 +378,7 @@ const PixelWave = React.memo(({ active }: { active: boolean }) => {
   );
 });
 
-const waveStyles = StyleSheet.create({
+const createWaveStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -386,12 +394,12 @@ const waveStyles = StyleSheet.create({
   pixel: {
     width: PIXEL_SIZE,
     height: PIXEL_SIZE,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     borderRadius: 1,
   },
   hint: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '500',
     letterSpacing: 0.8,
   },
@@ -403,27 +411,23 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-interface TelegramSession {
-  id: string;
-  duration: number;
-  stake: number;
-  created_at: string;
-  participantCount: number;
-  banned_apps: string[];
-}
-
 const DashboardScreen = ({ navigation }: any) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const { user, signOut, refreshTokenBalance } = useAuth();
   const [balance, setBalance]             = useState<string | null>(null);
   const [penaltyCount, setPenaltyCount]   = useState(0);
   const [penaltyCost, setPenaltyCost]     = useState(0);
+  const [activeStakeType, setActiveStakeType] = useState<'xrp' | 'tokens'>('xrp');
+  const [showPenaltyStats, setShowPenaltyStats] = useState(true);
   const [refreshing, setRefreshing]       = useState(false);
   const [copied, setCopied]               = useState(false);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
-  const [telegramSession, setTelegramSession] = useState<TelegramSession | null>(null);
   const [hasActiveGroup, setHasActiveGroup]   = useState(false);
   const [usageAccessGranted, setUsageAccessGranted] = useState(true);
   const [notifPermGranted, setNotifPermGranted]     = useState(true);
+  const [inAppNotif, setInAppNotif] = useState<{ title: string; body: string } | null>(null);
+  const showInAppNotif = (title: string, body: string) => setInAppNotif({ title, body });
   const [xrpPrices, setXrpPrices] = useState<{ usd: number; eur: number; chf: number } | null>(null);
   const [currency, setCurrency]   = useState<'usd' | 'eur' | 'chf'>('usd');
   const [chartData, setChartData] = useState<{ prices: number[]; change24h: number } | null>(null);
@@ -459,12 +463,10 @@ const DashboardScreen = ({ navigation }: any) => {
 
   const pendingPenalties       = useRef<{ appName: string; amount: number }[]>([]);
   const prevAppState           = useRef(AppState.currentState);
+  const activeGroupIdRef       = useRef<string | null>(null);
   const activePenaltyAmountRef = useRef<number>(0.5);
   const warnedAppsRef          = useRef<Set<string>>(new Set());
   const handlePenaltyRef       = useRef<(pkg: string, dur: number) => Promise<void>>(() => Promise.resolve());
-  const relayToTelegramRef     = useRef<(pkg: string, amount: number) => Promise<void>>(() => Promise.resolve());
-  const telegramIdRef          = useRef<string | null>(null);
-  const initialUrlProcessed    = useRef(false);
 
   const fetchBalance = useCallback(async () => {
     if (!user?.address) return;
@@ -537,44 +539,9 @@ const DashboardScreen = ({ navigation }: any) => {
     setRefreshing(false);
   }, [fetchBalance]);
 
-  const fetchTelegramSession = useCallback(async () => {
-    if (!user?.id) return;
-    const { data: link } = await supabase
-      .from('linked_accounts')
-      .select('telegram_id')
-      .eq('user_id', user.id)
-      .single();
-    if (!link?.telegram_id) { telegramIdRef.current = null; setTelegramSession(null); return; }
-    telegramIdRef.current = link.telegram_id;
-
-    const { data: participations } = await supabase
-      .from('participants')
-      .select('session_id')
-      .eq('user_id', link.telegram_id);
-    if (!participations?.length) { setTelegramSession(null); return; }
-
-    const { data: sessions } = await supabase
-      .from('sessions')
-      .select('*')
-      .in('id', participations.map((p: any) => p.session_id))
-      .eq('status', 'active')
-      .limit(1);
-    const session = sessions?.[0] ?? null;
-    if (!session) { setTelegramSession(null); return; }
-
-    const { count } = await supabase
-      .from('participants')
-      .select('id', { count: 'exact', head: true })
-      .eq('session_id', session.id);
-
-    setTelegramSession({ ...session, banned_apps: session.banned_apps ?? [], participantCount: count ?? 0 });
-  }, [user?.id]);
-
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return;
-
-      fetchTelegramSession();
 
       // Set threshold immediately so the native service uses 30 s from the start,
       // not the SharedPrefs default of 5 s that applies until the async DB call finishes.
@@ -583,10 +550,11 @@ const DashboardScreen = ({ navigation }: any) => {
       // Check usage access
       ScrollDetectionService.hasUsageAccess().then(granted => setUsageAccessGranted(granted));
 
-      // Check notification permission
+      // Request notification permission (Android 13+). Using request() so the
+      // OS prompts the user on first launch rather than relying on them tapping the banner.
       if (Platform.OS === 'android' && Platform.Version >= 33) {
-        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
-          .then(granted => setNotifPermGranted(granted));
+        PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
+          .then(result => setNotifPermGranted(result === PermissionsAndroid.RESULTS.GRANTED));
       } else {
         setNotifPermGranted(true);
       }
@@ -595,13 +563,17 @@ const DashboardScreen = ({ navigation }: any) => {
         if (error) return;
         const group = (data as any)?.groups;
         setHasActiveGroup(!!group);
+        activeGroupIdRef.current = group?.id ?? null;
         if (group?.penalty_amount) {
           activePenaltyAmountRef.current = group.penalty_amount;
         }
-        const bannedApps = telegramSession?.banned_apps?.length
-          ? telegramSession.banned_apps
-          : (group?.banned_apps ?? []);
-        ScrollDetectionService.updateSettings({ bannedApps });
+        setActiveStakeType(group?.stake_type ?? 'xrp');
+        const bannedApps = group?.banned_apps ?? [];
+        // Only push if non-empty — pushing [] overwrites SharedPrefs and clears the
+        // native default banned-apps list, disabling detection until the next focus.
+        if (bannedApps.length > 0) {
+          ScrollDetectionService.updateSettings({ bannedApps });
+        }
       });
     }, [user?.id]),
   );
@@ -619,47 +591,6 @@ const DashboardScreen = ({ navigation }: any) => {
     return () => loop.stop();
   }, [hasActiveGroup]);
 
-  // Sync banned apps to ScrollDetectionService whenever the Telegram session loads/changes
-  useEffect(() => {
-    if (!telegramSession?.banned_apps?.length) return;
-    ScrollDetectionService.updateSettings({
-      bannedApps: telegramSession.banned_apps,
-      thresholdSeconds: 30,
-    });
-  }, [telegramSession?.id]);
-
-  // Push Telegram context to native layer so it can POST deductions directly (bypassing JS thread)
-  useEffect(() => {
-    if (!telegramSession?.id || !telegramIdRef.current) return;
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session?.access_token) return;
-      ScrollDetectionService.setTelegramContext(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY,
-        session.access_token,
-        telegramIdRef.current!,
-        telegramSession.id,
-        telegramSession.stake,
-      );
-    });
-  }, [telegramSession?.id]);
-
-  // Poll session status every 10s so the UI clears as soon as it's closed
-  useEffect(() => {
-    if (!telegramSession?.id) return;
-    const interval = setInterval(async () => {
-      const { data } = await supabase
-        .from('sessions')
-        .select('status')
-        .eq('id', telegramSession.id)
-        .single();
-      if (data?.status !== 'active') {
-        setTelegramSession(null);
-      }
-    }, 10_000);
-    return () => clearInterval(interval);
-  }, [telegramSession?.id]);
-
   // After login, check if a group invite deep link was pending
   useEffect(() => {
     if (!user?.id) return;
@@ -671,128 +602,6 @@ const DashboardScreen = ({ navigation }: any) => {
     });
   }, [user?.id]);
 
-  // Core join logic — called both on mount (via AsyncStorage) and from live deep links
-  const processSessionJoin = useCallback(async (telegramId: string | null, sessionId: string) => {
-    if (!user?.id) return;
-
-    // Step 1 — link account if telegram_id provided
-    if (telegramId) {
-      await supabase
-        .from('linked_accounts')
-        .upsert({ telegram_id: telegramId, user_id: user.id });
-    }
-
-    // Step 2 — resolve telegram_id
-    const resolvedTelegramId = telegramId ?? await (async () => {
-      const { data } = await supabase
-        .from('linked_accounts')
-        .select('telegram_id')
-        .eq('user_id', user.id)
-        .single();
-      return data?.telegram_id ?? null;
-    })();
-
-    if (!resolvedTelegramId) {
-      Alert.alert('Link Telegram First', 'Open the bot and tap /start to link your account before joining a session.');
-      return;
-    }
-
-    // Step 3 — check session is active
-    const { data: session } = await supabase
-      .from('sessions')
-      .select('id, stake, duration')
-      .eq('id', sessionId)
-      .eq('status', 'active')
-      .single();
-
-    if (!session) {
-      Alert.alert('Session Not Found', 'This session has ended or does not exist.');
-      return;
-    }
-
-    // Step 4 — skip if already a participant
-    const { data: existing } = await supabase
-      .from('participants')
-      .select('id')
-      .eq('session_id', sessionId)
-      .eq('user_id', resolvedTelegramId)
-      .single();
-
-    if (existing) {
-      Alert.alert('Already Joined', 'You are already in this session.');
-      return;
-    }
-
-    // Step 5 — join
-    const { error } = await supabase
-      .from('participants')
-      .insert({ session_id: sessionId, user_id: resolvedTelegramId, username: resolvedTelegramId });
-
-    if (error) {
-      Alert.alert('Failed to Join', error.message);
-    } else {
-      fetchTelegramSession();
-      Alert.alert('Joined! 🎉', `You are in the session.\n⏱ ${session.duration} min  💰 ${session.stake} TON`);
-    }
-  }, [user?.id]);
-
-  // On mount / after login: drain anything saved to AsyncStorage while logged out.
-  // Falls back to Linking.getInitialURL() to handle a race condition where
-  // RootNavigator hasn't finished its async getInitialURL→setItem call by the
-  // time this effect runs (happens on cold start when user is already logged in).
-  useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      const [telegramId, sessionId] = await Promise.all([
-        AsyncStorage.getItem(PENDING_TELEGRAM_KEY),
-        AsyncStorage.getItem(PENDING_SESSION_KEY),
-      ]);
-      if (telegramId) AsyncStorage.removeItem(PENDING_TELEGRAM_KEY);
-      if (sessionId) {
-        AsyncStorage.removeItem(PENDING_SESSION_KEY);
-        await processSessionJoin(telegramId, sessionId);
-      } else if (telegramId) {
-        // Link only, no session to join
-        await supabase
-          .from('linked_accounts')
-          .upsert({ telegram_id: telegramId, user_id: user.id });
-      } else if (!initialUrlProcessed.current) {
-        // Fallback: read the launch URL directly in case RootNavigator lost the race
-        initialUrlProcessed.current = true;
-        const url = await Linking.getInitialURL();
-        if (!url) return;
-        const sMatch = url.match(/scrolltax:\/\/session\?id=([^&]+)/);
-        if (sMatch) {
-          const sid = sMatch[1].trim();
-          const tgM = url.match(/[?&]telegram_id=([^&]+)/);
-          await processSessionJoin(tgM ? tgM[1].trim() : null, sid);
-        }
-      }
-    })();
-  }, [user?.id]);
-
-  // Live deep-link handler: fires when the app is already open and a link arrives
-  useEffect(() => {
-    if (!user?.id) return;
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      const linkMatch = url.match(/scrolltax:\/\/link\?telegram_id=([^&]+)/);
-      if (linkMatch) {
-        supabase.from('linked_accounts').upsert({ telegram_id: linkMatch[1].trim(), user_id: user.id });
-        return;
-      }
-      const sessionMatch = url.match(/scrolltax:\/\/session\?id=([^&]+)/);
-      if (!sessionMatch) return;
-      const sessionId = sessionMatch[1].trim();
-      const tgMatch = url.match(/[?&]telegram_id=([^&]+)/);
-      const telegramId = tgMatch ? tgMatch[1].trim() : null;
-      // Clear AsyncStorage so the mount effect doesn't double-join on next app open
-      AsyncStorage.removeItem(PENDING_SESSION_KEY);
-      if (telegramId) AsyncStorage.removeItem(PENDING_TELEGRAM_KEY);
-      processSessionJoin(telegramId, sessionId);
-    });
-    return () => sub.remove();
-  }, [user?.id, processSessionJoin]);
-
   useEffect(() => {
     const fetchPrices = async () => {
       try {
@@ -801,7 +610,9 @@ const DashboardScreen = ({ navigation }: any) => {
         );
         const data = await res.json();
         setXrpPrices({ usd: data.ripple.usd, eur: data.ripple.eur, chf: data.ripple.chf });
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to fetch XRP prices:', err);
+      }
     };
     fetchPrices();
     const priceInterval = setInterval(fetchPrices, 60_000);
@@ -819,16 +630,33 @@ const DashboardScreen = ({ navigation }: any) => {
         if (!raw.length) return;
         const change = ((raw[raw.length - 1] - raw[0]) / raw[0]) * 100;
         setChartData({ prices: raw.slice(-24), change24h: change });
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to fetch XRP 24h chart:', err);
+      }
     };
     fetch24h();
     const chartInterval = setInterval(fetch24h, 60_000);
     return () => clearInterval(chartInterval);
   }, [currency]);
 
+  // Only run the foreground monitoring service when the user is in an active
+  // group AND has granted usage-access. Stop it in any other case.
+  useEffect(() => {
+    if (hasActiveGroup && usageAccessGranted) {
+      ScrollDetectionService.startMonitoring();
+    } else {
+      ScrollDetectionService.stopMonitoring();
+    }
+  }, [hasActiveGroup, usageAccessGranted]);
+
   useEffect(() => {
     fetchBalance();
-    ScrollDetectionService.startMonitoring();
+
+    // Register the XRPL seed with the native module so it can HMAC-sign
+    // the offline pending-penalty queue against tampering.
+    Keychain.getGenericPassword({ service: `xrpl-${user!.id}` }).then(cred => {
+      if (cred) ScrollDetectionService.setXrplSeed(cred.password);
+    }).catch(err => console.warn('Failed to register XRPL seed for offline penalty signing:', err));
 
     const scrollSub     = ScrollDetectionService.onScroll((_packageName: string) => {});
     const bannedAppSub  = ScrollDetectionService.onBannedAppEntered((packageName: string) => {
@@ -854,10 +682,7 @@ const DashboardScreen = ({ navigation }: any) => {
         'com.google.android.youtube': 'YouTube',
         'com.whatsapp':               'WhatsApp',
       } as Record<string, string>)[packageName] ?? packageName.split('.').pop() ?? packageName;
-      ScrollDetectionService.showNotification(
-        `⏰ 30s on ${friendlyName}`,
-        'Processing penalty…',
-      );
+      showInAppNotif(`⏰ 30s on ${friendlyName}`, 'Processing penalty…');
       handlePenaltyRef.current(packageName, duration);
     });
 
@@ -876,6 +701,35 @@ const DashboardScreen = ({ navigation }: any) => {
       if (nextState === 'active' && wasAway) {
         warnedAppsRef.current.clear();
 
+        // Re-push server-authoritative banned-apps settings to the native service,
+        // overwriting any SharedPreferences tampering that occurred while away.
+        groupService.getActiveGroupForUser(user!.id).then(({ data }) => {
+          const g = (data as any)?.groups;
+          if (g?.status === 'active') {
+            ScrollDetectionService.updateSettings({
+              thresholdSeconds: (g.penalty_trigger_time_minutes ?? 1) * 60,
+              bannedApps:       g.banned_apps ?? [],
+            });
+          }
+        }).catch(err => console.warn('Failed to re-push banned-apps settings:', err));
+
+        // Check if usage access was revoked while away. If so, forfeit the user's stake.
+        ScrollDetectionService.hasUsageAccess().then(async granted => {
+          setUsageAccessGranted(granted);
+          if (!granted && activeGroupIdRef.current) {
+            const groupId = activeGroupIdRef.current;
+            activeGroupIdRef.current = null;
+            setHasActiveGroup(false);
+            const result = await groupService.forfeitStake(groupId);
+            const lost = result.amount?.toFixed(2) ?? '?';
+            Alert.alert(
+              'Stake Forfeited',
+              `App usage permission was revoked. Your remaining stake of ${lost} has been forfeited and distributed to your group.`,
+              [{ text: 'OK' }],
+            );
+          }
+        });
+
         // Flush any penalties that fired while JS was inactive (app backgrounded)
         ScrollDetectionService.getPendingPenalties().then(pending => {
           if (!pending) return;
@@ -888,10 +742,7 @@ const DashboardScreen = ({ navigation }: any) => {
               'com.google.android.youtube': 'YouTube',
               'com.whatsapp':               'WhatsApp',
             } as Record<string, string>)[pkg] ?? pkg.split('.').pop() ?? pkg;
-            ScrollDetectionService.showNotification(
-              `⏰ 30s on ${friendlyName}`,
-              'Processing penalty…',
-            );
+            showInAppNotif(`⏰ 30s on ${friendlyName}`, 'Processing penalty…');
             handlePenaltyRef.current(pkg, duration);
           });
         });
@@ -914,73 +765,10 @@ const DashboardScreen = ({ navigation }: any) => {
     return () => subscription.remove();
   }, [fetchBalance]);
 
-  const DEV_WALLET = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
-
-  const FRIENDLY_APP_NAMES: Record<string, string> = {
-    'com.zhiliaoapp.musically':   'TikTok',
-    'com.instagram.android':      'Instagram',
-    'com.google.android.youtube': 'YouTube',
-    'com.whatsapp':               'WhatsApp',
-  };
-
-  // Keep refs in sync so the AppState flush handler always calls the latest version
-  const relayToTelegram = useCallback(async (packageName: string, amount: number) => {
-    if (!user?.id) return;
-
-    const { data: link } = await supabase
-      .from('linked_accounts')
-      .select('telegram_id')
-      .eq('user_id', user.id)
-      .single();
-    if (!link?.telegram_id) {
-      ScrollDetectionService.showNotification('📵 Telegram not linked', 'Link your Telegram account in the bot to enable TON penalties.');
-      return;
-    }
-
-    const { data: participations } = await supabase
-      .from('participants')
-      .select('session_id')
-      .eq('user_id', link.telegram_id);
-    if (!participations?.length) {
-      ScrollDetectionService.showNotification('📵 No Telegram session', 'Join a session via the bot to enable TON penalties.');
-      return;
-    }
-
-    const { data: session } = await supabase
-      .from('sessions')
-      .select('id')
-      .in('id', participations.map((p: any) => p.session_id))
-      .eq('status', 'active')
-      .single();
-    if (!session) {
-      ScrollDetectionService.showNotification('📵 Session ended', 'No active Telegram session found.');
-      return;
-    }
-
-    const appName = FRIENDLY_APP_NAMES[packageName] ?? (packageName.split('.').pop() ?? packageName);
-
-    // Try with app_name first; if column doesn't exist yet, retry without it
-    const { error } = await supabase.from('deductions').insert({
-      session_id: session.id,
-      telegram_id: link.telegram_id,
-      amount,
-      app_name: appName,
-    });
-
-    if (error) {
-      console.log('[relayToTelegram] insert error:', error.message, '— retrying without app_name');
-      const { error: retryError } = await supabase.from('deductions').insert({
-        session_id: session.id,
-        telegram_id: link.telegram_id,
-        amount,
-      });
-      if (retryError) console.log('[relayToTelegram] retry failed:', retryError.message);
-    }
-  }, [user?.id]);
-  relayToTelegramRef.current = relayToTelegram;
+  const DEV_WALLET = HOUSE_WALLET || 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
 
   const handlePenaltyTriggered = async (packageName: string, _durationMinutes: number) => {
-    const { data: membership, error: groupErr } = await groupService.getActiveGroupForUser(user!.id);
+    const { data: membership } = await groupService.getActiveGroupForUser(user!.id);
     const group = membership?.groups as any;
     if (!group?.id) {
       return;
@@ -997,49 +785,99 @@ const DashboardScreen = ({ navigation }: any) => {
 
     try {
       if (isTokenGroup) {
-        // ── Token penalty path ──────────────────────────────────────────────
-        const allMemberIds = await groupService.getGroupMemberIds(group.id);
-        const otherMemberIds = allMemberIds.filter(id => id !== user!.id);
-
-        await tokenService.redistributePenalty(user!.id, otherMemberIds, penaltyAmount);
-        ScrollDetectionService.showNotification(
-          `◈ ${penaltyAmount} Tokens deducted`,
-          otherMemberIds.length > 0
-            ? `Penalty for ${appName} — split to ${otherMemberIds.length} member(s).`
-            : `Penalty for ${appName} — tokens removed.`,
-        );
-        // Refresh the token balance shown in the Tokens tab
+        // ── Token penalty path (server-side atomic) ─────────────────────────
+        const result = await groupService.recordPenaltyRpc(group.id, packageName);
+        if (!result.ok) {
+          if (result.error === 'rate_limited') return;
+          throw new Error(result.error ?? 'Penalty failed');
+        }
+        showInAppNotif(`◈ ${result.amount} Tokens deducted`, `Penalty for ${appName} — split to group.`);
         refreshTokenBalance();
+      } else if (treasuryService.address) {
+        // ── XRP penalty path (treasury-backed) ──────────────────────────────
+        // Redistribution happens server-side inside record_penalty: the
+        // offender's held stake is debited and split to the other members'
+        // ledger balances. No device-signed on-chain transaction here.
+        const result = await groupService.recordPenaltyRpc(group.id, packageName);
+        if (!result.ok && result.error !== 'rate_limited') {
+          throw new Error(result.error ?? 'Penalty failed');
+        }
+        if (result.ok) {
+          showInAppNotif(`💸 ${penaltyAmount} XRP penalty`, `Deducted from your stake and split to the group.`);
+          fetchBalance();
+        }
       } else {
-        // ── XRP penalty path ────────────────────────────────────────────────
+        // ── XRP penalty path (legacy: device signs from the user's wallet) ──
         const { data: members } = await groupService.getGroupMembers(group.id);
         const otherMembers = members.filter((m: any) => m.user_id !== user!.id && m.wallet_address);
 
         const credentials = await Keychain.getGenericPassword({ service: `xrpl-${user!.id}` });
         if (!credentials) return;
 
+        const txHashes: string[] = [];
         if (otherMembers.length === 0) {
-          await xrplService.sendXrp(credentials.password, DEV_WALLET, String(penaltyAmount));
-          ScrollDetectionService.showNotification(
-            `💸 ${penaltyAmount} XRP sent to the pot`,
-            `Penalty for ${appName} — no group mates yet, sent to the house.`,
-          );
+          const tx = await xrplService.sendXrp(credentials.password, DEV_WALLET, String(penaltyAmount));
+          const h = (tx as any)?.result?.hash;
+          if (h) txHashes.push(h);
+          showInAppNotif(`💸 ${penaltyAmount} XRP sent to the pot`, `Penalty for ${appName} — no group mates yet, sent to the house.`);
         } else {
-          const share = Math.floor((penaltyAmount / otherMembers.length) * 1e6) / 1e6;
-          await Promise.all(
-            otherMembers.map((m: any) =>
-              xrplService.sendXrp(credentials.password, m.wallet_address, String(share)),
-            ),
-          );
-          ScrollDetectionService.showNotification(
-            `💸 ${penaltyAmount} XRP split to the group`,
-            `Penalty for ${appName} — ${share} XRP sent to each of ${otherMembers.length} member(s).`,
-          );
+          // Split in integer drops so no dust is lost; the remainder goes to the
+          // first member (see splitDrops). XRPL payments are independent and cannot
+          // be made atomic, so track how many succeeded — a mid-loop failure is
+          // surfaced instead of recording one hash as if everyone had been paid.
+          const perMemberDrops = splitDrops(xrpToDropsInt(penaltyAmount), otherMembers.length);
+          let sent = 0;
+          let attempted = 0;
+          try {
+            for (let i = 0; i < otherMembers.length; i++) {
+              const drops = perMemberDrops[i];
+              if (drops <= 0) continue; // nothing owed to this member
+              attempted += 1;
+              const tx = await xrplService.sendXrp(
+                credentials.password, otherMembers[i].wallet_address, dropsToXrpString(drops),
+              );
+              const h = (tx as any)?.result?.hash;
+              if (h) txHashes.push(h);
+              sent += 1;
+            }
+          } catch (sendErr: any) {
+            fetchBalance();
+            throw new Error(
+              `Penalty partially sent: ${sent}/${attempted} members paid. ${sendErr?.message ?? ''}`.trim(),
+            );
+          }
+          showInAppNotif(`💸 ${penaltyAmount} XRP split to the group`, `Penalty for ${appName} — split across ${otherMembers.length} member(s).`);
         }
         fetchBalance();
-      }
 
-      await groupService.recordPenalty(user!.id, group.id, penaltyAmount);
+        // Record server-side — server re-reads penalty_amount from group row.
+        const txHash = txHashes[0];
+        const result = await groupService.recordPenaltyRpc(group.id, packageName, txHash);
+        if (!result.ok && result.error !== 'rate_limited') {
+          throw new Error(result.error ?? 'Server record failed');
+        }
+
+        // Best-effort on-chain verification — awaited so errors are swallowed cleanly.
+        if (txHash && result.ok) {
+          try {
+            const { data: evtRows } = await supabase
+              .from('penalty_events')
+              .select('id')
+              .eq('group_id', group.id)
+              .eq('user_id', user!.id)
+              .order('fired_at', { ascending: false })
+              .limit(1);
+            const eventId = evtRows?.[0]?.id;
+            if (eventId) {
+              await supabase.functions.invoke('verify-penalty-tx', {
+                body: { penalty_event_id: eventId, tx_hash: txHash },
+              });
+            }
+          } catch {
+            // Non-fatal: verification will be retried on the next penalty.
+          }
+        }
+      }
     } catch (e: any) {
       setPenaltyCount(prev => prev - 1);
       setPenaltyCost(prev => prev - penaltyAmount);
@@ -1152,7 +990,7 @@ const DashboardScreen = ({ navigation }: any) => {
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -1191,7 +1029,7 @@ const DashboardScreen = ({ navigation }: any) => {
                 activeOpacity={0.7}
               >
                 <Text style={[styles.walletTabText, activeWalletTab === tab && styles.walletTabTextActive]}>
-                  {tab === 'app' ? 'App Wallet' : tab === 'ledger' ? '▣  Ledger' : '◈  Tokens'}
+                  {tab === 'app' ? '○ App Wallet' : tab === 'ledger' ? '▣  Ledger' : '◈  Tokens'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1216,13 +1054,20 @@ const DashboardScreen = ({ navigation }: any) => {
           <Animated.View style={{ opacity: tabContentOpacity }}>
           {activeWalletTab === 'app' ? (
             <TouchableOpacity onPress={handleTapRefresh} activeOpacity={1}>
+              <TouchableOpacity
+                onPress={() => setShowPenaltyStats(v => !v)}
+                style={styles.statsToggleBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.statsToggleBtnText}>{showPenaltyStats ? '−' : '+'}</Text>
+              </TouchableOpacity>
               {/* Main content blurs on tap */}
               <Animated.View style={[styles.balanceCardInner, { opacity: balanceOpacity }]}>
                 {/* Left: total balance */}
-                <View style={styles.balanceLeft}>
+                <View style={[styles.balanceLeft, !showPenaltyStats && { alignItems: 'center' }]}>
                   <Text style={styles.balanceLabel}>Total Balance</Text>
                   {balance === null ? (
-                    <ActivityIndicator color={Colors.primary} style={{ marginTop: 8 }} />
+                    <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
                   ) : (
                     <>
                       <View style={styles.balanceRow}>
@@ -1256,37 +1101,47 @@ const DashboardScreen = ({ navigation }: any) => {
                   )}
                 </View>
 
-                <View style={styles.cardDividerV} />
+                {showPenaltyStats && (
+                  <>
+                    <View style={styles.cardDividerV} />
 
-                {/* Right: stats */}
-                <View style={styles.balanceRight}>
-                  <View style={styles.statItem}>
-                    <AnimatedNumber value={penaltyCount} decimals={0} style={styles.statValue} />
-                    <Text style={styles.statLabel}>Penalties</Text>
-                  </View>
-                  <View style={styles.statItemDivider} />
-                  <View style={styles.statItem}>
-                    <AnimatedNumber
-                      value={penaltyCost}
-                      decimals={2}
-                      style={[styles.statValue, penaltyCost > 0 && { color: Colors.error }]}
-                    />
-                    <Text style={styles.statLabel}>XRP Lost</Text>
-                  </View>
-                  <View style={styles.statItemDivider} />
-                  <View style={styles.statItem}>
-                    {balance !== null ? (
-                      <AnimatedNumber
-                        value={parseFloat(balance) - penaltyCost}
-                        decimals={2}
-                        style={styles.statValue}
-                      />
-                    ) : (
-                      <Text style={styles.statValue}>—</Text>
-                    )}
-                    <Text style={styles.statLabel}>Net Balance</Text>
-                  </View>
-                </View>
+                    {/* Right: stats */}
+                    <View style={styles.balanceRight}>
+                      <View style={styles.statItem}>
+                        <AnimatedNumber value={penaltyCount} decimals={0} style={styles.statValue} />
+                        <Text style={styles.statLabel}>Penalties</Text>
+                      </View>
+                      <View style={styles.statItemDivider} />
+                      <View style={styles.statItem}>
+                        <AnimatedNumber
+                          value={penaltyCost}
+                          decimals={2}
+                          style={[styles.statValue, penaltyCost > 0 && { color: colors.error }]}
+                        />
+                        <Text style={styles.statLabel}>{activeStakeType === 'tokens' ? 'Tokens Lost' : 'XRP Lost'}</Text>
+                      </View>
+                      <View style={styles.statItemDivider} />
+                      <View style={styles.statItem}>
+                        {activeStakeType === 'tokens' ? (
+                          <AnimatedNumber
+                            value={(user?.tokens ?? 0) - penaltyCost}
+                            decimals={2}
+                            style={styles.statValue}
+                          />
+                        ) : balance !== null ? (
+                          <AnimatedNumber
+                            value={parseFloat(balance) - penaltyCost}
+                            decimals={2}
+                            style={styles.statValue}
+                          />
+                        ) : (
+                          <Text style={styles.statValue}>—</Text>
+                        )}
+                        <Text style={styles.statLabel}>Net Balance</Text>
+                      </View>
+                    </View>
+                  </>
+                )}
               </Animated.View>
 
               {/* Footer: wave + hint always mounted, cross-fade via active prop */}
@@ -1317,7 +1172,7 @@ const DashboardScreen = ({ navigation }: any) => {
               {ledgerUiState === 'scanning' && (
                 <>
                   <View style={styles.ledgerRow}>
-                    <ActivityIndicator color={Colors.primary} size="small" />
+                    <ActivityIndicator color={colors.primary} size="small" />
                     <Text style={styles.ledgerScanningText}>Searching for devices…</Text>
                   </View>
                   <Text style={styles.ledgerTip}>Open the XRP app on your Ledger before connecting</Text>
@@ -1348,7 +1203,7 @@ const DashboardScreen = ({ navigation }: any) => {
 
               {ledgerUiState === 'connecting' && (
                 <>
-                  <ActivityIndicator color={Colors.primary} />
+                  <ActivityIndicator color={colors.primary} />
                   <Text style={styles.ledgerScanningText}>
                     Connecting to {connectingDeviceName.current}…
                   </Text>
@@ -1395,15 +1250,48 @@ const DashboardScreen = ({ navigation }: any) => {
             </View>
           ) : (
             /* ── Tokens tab ── */
-            <View style={styles.tokenTabContent}>
-              <View style={styles.tokenIconRow}>
-                <Text style={styles.tokenIcon}>◈</Text>
-                <Text style={styles.tokenBalanceValue}>{user?.tokens ?? '—'}</Text>
-                <Text style={styles.tokenBalanceUnit}>Tokens</Text>
+            <View style={styles.balanceCardInner}>
+              <TouchableOpacity
+                onPress={() => setShowPenaltyStats(v => !v)}
+                style={styles.statsToggleBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.statsToggleBtnText}>{showPenaltyStats ? '−' : '+'}</Text>
+              </TouchableOpacity>
+              <View style={[styles.balanceLeft, !showPenaltyStats && { alignItems: 'center' }]}>
+                <Text style={styles.balanceLabel}>Token Balance</Text>
+                <View style={styles.tokenIconRow}>
+                  <Text style={styles.tokenIcon}>◈</Text>
+                  <Text style={styles.tokenBalanceValue}>{user?.tokens ?? '—'}</Text>
+                  <Text style={styles.tokenBalanceUnit}>Tokens</Text>
+                </View>
+                <Text style={styles.tokenDescription}>In-app currency</Text>
               </View>
-              <Text style={styles.tokenDescription}>
-                In-app currency · Use for staking or redeeming gifts
-              </Text>
+              {showPenaltyStats && (
+                <>
+                  <View style={styles.cardDividerV} />
+                  <View style={styles.balanceRight}>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{penaltyCount}</Text>
+                      <Text style={styles.statLabel}>Penalties</Text>
+                    </View>
+                    <View style={styles.statItemDivider} />
+                    <View style={styles.statItem}>
+                      <Text style={[styles.statValue, penaltyCost > 0 && { color: colors.error }]}>
+                        {penaltyCost.toFixed(2)}
+                      </Text>
+                      <Text style={styles.statLabel}>Tokens Lost</Text>
+                    </View>
+                    <View style={styles.statItemDivider} />
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>
+                        {((user?.tokens ?? 0) - penaltyCost).toFixed(2)}
+                      </Text>
+                      <Text style={styles.statLabel}>Net Balance</Text>
+                    </View>
+                  </View>
+                </>
+              )}
             </View>
           )}
           </Animated.View>
@@ -1421,19 +1309,6 @@ const DashboardScreen = ({ navigation }: any) => {
           </Animated.View>
         )}
 
-        {/* Gift Shop — shown only when Tokens tab is active */}
-        {activeWalletTab === 'tokens' && (
-          <Animated.View style={[styles.giftShopCard, { opacity: balanceAnim.opacity, transform: [{ translateY: balanceAnim.translateY }], alignSelf: 'stretch' }]}>
-            <View style={styles.giftShopHeader}>
-              <Text style={styles.giftShopTitle}>Gift Shop</Text>
-              <View style={styles.giftShopBadge}>
-                <Text style={styles.giftShopBadgeText}>COMING SOON</Text>
-              </View>
-            </View>
-            <Text style={styles.giftShopSub}>Redeem your tokens for rewards</Text>
-
-          </Animated.View>
-        )}
 
         {/* Permission warnings */}
         {!usageAccessGranted && (
@@ -1482,7 +1357,7 @@ const DashboardScreen = ({ navigation }: any) => {
               onPress={() => navigation.navigate('Groups')}
               activeOpacity={0.75}
             >
-              <Text style={[styles.actionIcon, { color: Colors.primary }]}>◉◉</Text>
+              <Text style={[styles.actionIcon, { color: colors.primary }]}>◉◉</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>My Groups</Text>
                 <Text style={styles.actionSub}>View & manage</Text>
@@ -1500,7 +1375,7 @@ const DashboardScreen = ({ navigation }: any) => {
               onPress={() => navigation.navigate('CreateGroup')}
               activeOpacity={0.75}
             >
-              <Text style={[styles.actionIcon, { color: Colors.primary }]}>⊕</Text>
+              <Text style={[styles.actionIcon, { color: colors.primary }]}>⊕</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>New Group</Text>
                 <Text style={styles.actionSub}>Start an accountability group</Text>
@@ -1512,10 +1387,25 @@ const DashboardScreen = ({ navigation }: any) => {
 
             <TouchableOpacity
               style={styles.actionBar}
+              onPress={() => navigation.navigate('SelfBets')}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.actionIcon, { color: colors.primary }]}>◆</Text>
+              <View style={styles.actionBarText}>
+                <Text style={styles.actionLabel}>Bet on Yourself</Text>
+                <Text style={styles.actionSub}>GitHub, Strava, Chess.com & LeetCode goals</Text>
+              </View>
+              <Text style={styles.actionChevron}>›</Text>
+            </TouchableOpacity>
+
+            <View style={styles.actionBarDivider} />
+
+            <TouchableOpacity
+              style={styles.actionBar}
               onPress={() => navigation.navigate('DistractionSettings')}
               activeOpacity={0.75}
             >
-              <Text style={[styles.actionIcon, { color: Colors.primary }]}>⚙</Text>
+              <Text style={[styles.actionIcon, { color: colors.primary }]}>⚙</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>Tracking</Text>
                 <Text style={styles.actionSub}>App & threshold settings</Text>
@@ -1530,7 +1420,7 @@ const DashboardScreen = ({ navigation }: any) => {
               onPress={() => navigation.navigate('CryptoGuide')}
               activeOpacity={0.75}
             >
-              <Text style={[styles.actionIcon, { color: Colors.primary }]}>⬡</Text>
+              <Text style={[styles.actionIcon, { color: colors.primary }]}>⬡</Text>
               <View style={styles.actionBarText}>
                 <Text style={styles.actionLabel}>Crypto Guide</Text>
                 <Text style={styles.actionSub}>How blockchain & XRP work</Text>
@@ -1538,40 +1428,6 @@ const DashboardScreen = ({ navigation }: any) => {
               <Text style={styles.actionChevron}>›</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Telegram Session */}
-          {telegramSession && (() => {
-            const endsAt = new Date(
-              new Date(telegramSession.created_at).getTime() + telegramSession.duration * 60 * 1000,
-            );
-            const minsLeft = Math.max(0, Math.round((endsAt.getTime() - Date.now()) / 60000));
-            return (
-              <View style={styles.tgSessionBox}>
-                <View style={styles.tgSessionHeader}>
-                  <Text style={styles.tgPlane}>✈️</Text>
-                  <Text style={styles.tgSessionTitle}>Active Telegram Session</Text>
-                  <View style={styles.tgLiveDot} />
-                </View>
-                <View style={styles.tgSessionRow}>
-                  <View style={styles.tgStat}>
-                    <Text style={styles.tgStatValue}>{minsLeft}m</Text>
-                    <Text style={styles.tgStatLabel}>Time Left</Text>
-                  </View>
-                  <View style={styles.tgStatDivider} />
-                  <View style={styles.tgStat}>
-                    <Text style={styles.tgStatValue}>{telegramSession.stake}</Text>
-                    <Text style={styles.tgStatLabel}>TON Stake</Text>
-                  </View>
-                  <View style={styles.tgStatDivider} />
-                  <View style={styles.tgStat}>
-                    <Text style={styles.tgStatValue}>{telegramSession.participantCount}</Text>
-                    <Text style={styles.tgStatLabel}>Players</Text>
-                  </View>
-                </View>
-                <Text style={styles.tgSessionId}>ID: {telegramSession.id.slice(0, 8)}…</Text>
-              </View>
-            );
-          })()}
 
           {/* Testnet notice */}
           <View style={styles.networkBadge}>
@@ -1588,7 +1444,10 @@ const DashboardScreen = ({ navigation }: any) => {
         animationType="slide"
         onRequestClose={() => setSendModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Send XRP via Ledger</Text>
             <Text style={styles.modalLabel}>Destination address</Text>
@@ -1597,7 +1456,7 @@ const DashboardScreen = ({ navigation }: any) => {
               value={sendDestination}
               onChangeText={setSendDestination}
               placeholder="r..."
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -1607,7 +1466,7 @@ const DashboardScreen = ({ navigation }: any) => {
               value={sendAmount}
               onChangeText={setSendAmount}
               placeholder="0.00"
-              placeholderTextColor={Colors.textMuted}
+              placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
             />
             {sendError && <Text style={styles.ledgerError}>{sendError}</Text>}
@@ -1627,16 +1486,24 @@ const DashboardScreen = ({ navigation }: any) => {
               <Text style={styles.ledgerStopText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
+
+      {inAppNotif && (
+        <InAppNotification
+          title={inAppNotif.title}
+          body={inAppNotif.body}
+          onDismiss={() => setInAppNotif(null)}
+        />
+      )}
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   content: {
     padding: 20,
@@ -1646,6 +1513,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 8,
     marginBottom: 24,
   },
   addressRow: {
@@ -1657,7 +1525,7 @@ const styles = StyleSheet.create({
   walletAddress: {
     flex: 1,
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontFamily: 'monospace',
   },
   copyButton: {
@@ -1665,30 +1533,30 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
   },
   copyButtonText: {
     fontSize: 10,
     fontWeight: '600',
-    color: Colors.primary,
+    color: colors.primary,
   },
   signOutButton: {
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.7)',
+    borderColor: colors.border,
   },
   signOutText: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
   },
   balanceCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     marginBottom: 28,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -1708,7 +1576,7 @@ const styles = StyleSheet.create({
   },
   cardDividerV: {
     width: 1,
-    backgroundColor: 'rgba(42, 42, 42, 0.5)',
+    backgroundColor: colors.border,
     marginLeft: 28,
     marginRight: 12,
   },
@@ -1724,7 +1592,7 @@ const styles = StyleSheet.create({
   },
   statItemDivider: {
     height: 1,
-    backgroundColor: 'rgba(42, 42, 42, 0.4)',
+    backgroundColor: colors.border,
     marginVertical: 4,
   },
   addressFooterRow: {
@@ -1736,7 +1604,7 @@ const styles = StyleSheet.create({
   },
   cardFooter: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(42, 42, 42, 0.4)',
+    borderTopColor: colors.border,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1744,7 +1612,7 @@ const styles = StyleSheet.create({
   },
   balanceLabel: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -1752,13 +1620,13 @@ const styles = StyleSheet.create({
   balanceValue: {
     fontSize: 44,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.text,
     marginTop: 4,
     letterSpacing: -2,
   },
   balanceCurrency: {
     fontSize: 16,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     marginTop: -2,
   },
@@ -1770,13 +1638,13 @@ const styles = StyleSheet.create({
   },
   balanceCurrencyInline: {
     fontSize: 18,
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '600',
     marginBottom: 5,
   },
   fiatValue: {
     fontSize: 14,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '500',
     marginTop: 4,
   },
@@ -1790,29 +1658,29 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
   },
   currencyChipActive: {
-    borderColor: Colors.primary,
+    borderColor: colors.primary,
     backgroundColor: 'rgba(255, 83, 0, 0.12)',
   },
   currencyChipText: {
     fontSize: 10,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     letterSpacing: 0.5,
   },
   currencyChipTextActive: {
-    color: Colors.primary,
+    color: colors.primary,
   },
   statValue: {
     fontSize: 20,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
   },
   statLabel: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 1,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -1820,21 +1688,21 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(42, 42, 42, 0.5)',
+    backgroundColor: colors.border,
     marginBottom: 24,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 14,
     letterSpacing: -0.2,
   },
   actionsList: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     marginBottom: 28,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -1852,7 +1720,7 @@ const styles = StyleSheet.create({
   },
   actionBarDivider: {
     height: 1,
-    backgroundColor: 'rgba(42, 42, 42, 0.4)',
+    backgroundColor: colors.border,
     marginLeft: 54,
   },
   actionBarText: {
@@ -1860,7 +1728,7 @@ const styles = StyleSheet.create({
   },
   actionChevron: {
     fontSize: 22,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '300',
     lineHeight: 24,
   },
@@ -1868,9 +1736,9 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#30D158',
+    backgroundColor: colors.secondary,
     marginRight: 8,
-    shadowColor: '#30D158',
+    shadowColor: colors.secondary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 4,
@@ -1884,12 +1752,12 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -0.2,
   },
   actionSub: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 1,
     lineHeight: 15,
   },
@@ -1904,76 +1772,12 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: Colors.secondary,
+    backgroundColor: colors.secondary,
   },
   networkText: {
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '500',
-  },
-  tgSessionBox: {
-    backgroundColor: 'rgba(255, 83, 0, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 83, 0, 0.25)',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  tgSessionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 6,
-  },
-  tgPlane: {
-    fontSize: 16,
-  },
-  tgSessionTitle: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.primary,
-    letterSpacing: -0.1,
-  },
-  tgLiveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.primary,
-  },
-  tgSessionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  tgStat: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  tgStatDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: 'rgba(255, 83, 0, 0.2)',
-  },
-  tgStatValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.primary,
-  },
-  tgStatLabel: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-  tgSessionId: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    fontFamily: 'monospace',
-    opacity: 0.7,
   },
   permissionBox: {
     flexDirection: 'row',
@@ -1996,16 +1800,16 @@ const styles = StyleSheet.create({
   permissionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.primary,
+    color: colors.primary,
   },
   permissionSub: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 1,
   },
   permissionChevron: {
     fontSize: 20,
-    color: Colors.primary,
+    color: colors.primary,
     opacity: 0.7,
   },
 
@@ -2013,7 +1817,7 @@ const styles = StyleSheet.create({
   walletTabRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
+    borderBottomColor: colors.border,
   },
   walletTab: {
     flex: 1,
@@ -2022,23 +1826,23 @@ const styles = StyleSheet.create({
   },
   walletTabActive: {
     borderBottomWidth: 2,
-    borderBottomColor: Colors.primary,
+    borderBottomColor: colors.primary,
   },
   walletTabIndicator: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     height: 2,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
   },
   walletTabText: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     letterSpacing: -0.1,
   },
   walletTabTextActive: {
-    color: Colors.primary,
+    color: colors.primary,
   },
 
   // ─── Ledger tab content ──────────────────────────────────────────────────────
@@ -2051,20 +1855,20 @@ const styles = StyleSheet.create({
   ledgerIdleTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 6,
     letterSpacing: -0.3,
     textAlign: 'center',
   },
   ledgerIdleSub: {
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textAlign: 'center',
     marginBottom: 18,
     lineHeight: 17,
   },
   ledgerScanBtn: {
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 28,
@@ -2078,7 +1882,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   ledgerError: {
-    color: Colors.error,
+    color: colors.error,
     fontSize: 12,
     marginTop: 10,
     textAlign: 'center',
@@ -2092,13 +1896,13 @@ const styles = StyleSheet.create({
   },
   ledgerScanningText: {
     fontSize: 13,
-    color: Colors.text,
+    color: colors.text,
     fontWeight: '600',
     textAlign: 'center',
   },
   ledgerTip: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textAlign: 'center',
     marginTop: 6,
     lineHeight: 16,
@@ -2118,16 +1922,16 @@ const styles = StyleSheet.create({
   ledgerDeviceName: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.text,
+    color: colors.text,
   },
   ledgerDeviceConnect: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.primary,
+    color: colors.primary,
   },
   ledgerStopText: {
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -2143,7 +1947,7 @@ const styles = StyleSheet.create({
   ledgerConnectedLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.primary,
+    color: colors.primary,
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
@@ -2160,18 +1964,18 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     borderBottomWidth: 0,
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 18,
     letterSpacing: -0.4,
     textAlign: 'center',
@@ -2179,98 +1983,40 @@ const styles = StyleSheet.create({
   modalLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 6,
     marginTop: 12,
   },
   modalInput: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.background,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.7)',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    color: Colors.text,
+    color: colors.text,
     fontFamily: 'monospace',
   },
 
-  // ─── Gift Shop card ───────────────────────────────────────────────────────
-  giftShopCard: {
-    marginTop: 0,
-    marginBottom: 28,
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 20,
-  },
-  giftShopHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  giftShopTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.text,
-    letterSpacing: -0.3,
-  },
-  giftShopBadge: {
-    backgroundColor: 'rgba(255, 83, 0, 0.12)',
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  giftShopBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Colors.primary,
-    letterSpacing: 0.5,
-  },
-  giftShopSub: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    marginBottom: 16,
-  },
-  giftShopGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  giftShopItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 6,
-    opacity: 0.4,
-  },
-  giftShopItemIcon: {
-    fontSize: 22,
-  },
-  giftShopItemLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: Colors.textMuted,
-    letterSpacing: 0.2,
-  },
-
-  // ─── Wallet tab: active token overrides ────────────────────────────────────
-  walletTabActiveToken: {
-    borderBottomColor: Colors.primary,
-  },
-  walletTabTextActiveToken: {
-    color: Colors.primary,
-  },
-
   // ─── Tokens tab content ───────────────────────────────────────────────────
-  tokenTabContent: {
-    padding: 24,
+  statsToggleBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 22,
+    height: 22,
     alignItems: 'center',
-    minHeight: 180,
     justifyContent: 'center',
-    gap: 6,
+    zIndex: 10,
+  },
+  statsToggleBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.primary,
+    lineHeight: 18,
   },
   tokenIconRow: {
     flexDirection: 'row',
@@ -2280,53 +2026,24 @@ const styles = StyleSheet.create({
   },
   tokenIcon: {
     fontSize: 22,
-    color: Colors.primary,
+    color: colors.primary,
   },
   tokenBalanceValue: {
     fontSize: 36,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -1,
   },
   tokenBalanceUnit: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.primary,
+    color: colors.primary,
     letterSpacing: -0.3,
   },
   tokenDescription: {
     fontSize: 12,
-    color: Colors.textMuted,
-    textAlign: 'center',
+    color: colors.textMuted,
     lineHeight: 17,
-  },
-  tokenDivider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    width: '100%',
-    marginVertical: 12,
-  },
-  tokenComingSoonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  tokenComingSoonLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textMuted,
-  },
-  tokenComingSoonBadge: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Colors.primary,
-    backgroundColor: 'rgba(255, 83, 0, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 20,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    overflow: 'hidden',
   },
 });
 

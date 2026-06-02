@@ -7,11 +7,15 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import { Colors } from '../../theme/colors';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 
 // ─── Diagram: Blockchain Chain ────────────────────────────────────────────────
 
-const BlockchainDiagram = () => (
+const BlockchainDiagram = () => {
+  const { colors } = useTheme();
+  const diag = createDiag(colors);
+  return (
   <View style={diag.wrap}>
     {['Block 1', 'Block 2', 'Block 3'].map((label, i) => (
       <View key={label} style={diag.blockRow}>
@@ -42,11 +46,15 @@ const BlockchainDiagram = () => (
       </View>
     ))}
   </View>
-);
+  );
+};
 
 // ─── Diagram: Transaction Flow ────────────────────────────────────────────────
 
-const TxFlowDiagram = () => (
+const TxFlowDiagram = () => {
+  const { colors } = useTheme();
+  const diag = createDiag(colors);
+  return (
   <View style={diag.wrap}>
     <View style={diag.flowRow}>
       {/* Sender */}
@@ -92,9 +100,9 @@ const TxFlowDiagram = () => (
     <View style={diag.flowTimeline}>
       <View style={diag.timelineDot} />
       <View style={diag.timelineBar} />
-      <View style={[diag.timelineDot, { backgroundColor: Colors.primary }]} />
+      <View style={[diag.timelineDot, { backgroundColor: colors.primary }]} />
       <View style={diag.timelineBar} />
-      <View style={[diag.timelineDot, { backgroundColor: Colors.secondary }]} />
+      <View style={[diag.timelineDot, { backgroundColor: colors.secondary }]} />
     </View>
     <View style={diag.flowTimestamps}>
       <Text style={diag.tsLabel}>0s</Text>
@@ -102,11 +110,15 @@ const TxFlowDiagram = () => (
       <Text style={diag.tsLabel}>~4s</Text>
     </View>
   </View>
-);
+  );
+};
 
 // ─── Diagram: Keys & Wallet ───────────────────────────────────────────────────
 
-const KeysDiagram = () => (
+const KeysDiagram = () => {
+  const { colors } = useTheme();
+  const diag = createDiag(colors);
+  return (
   <View style={diag.wrap}>
     <View style={diag.keysRow}>
       {/* Private key */}
@@ -116,7 +128,7 @@ const KeysDiagram = () => (
         <Text style={diag.keyMono}>sEdV…9k2r</Text>
         <Text style={diag.keyDesc}>Secret. Never share. Used to sign transactions.</Text>
         <View style={[diag.keyBadge, { backgroundColor: 'rgba(255,69,58,0.15)', borderColor: 'rgba(255,69,58,0.3)' }]}>
-          <Text style={[diag.keyBadgeText, { color: Colors.error }]}>PRIVATE</Text>
+          <Text style={[diag.keyBadgeText, { color: colors.error }]}>PRIVATE</Text>
         </View>
       </View>
 
@@ -131,23 +143,25 @@ const KeysDiagram = () => (
         <Text style={diag.keyMono}>rABC…xyz</Text>
         <Text style={diag.keyDesc}>Safe to share. This is where people send XRP to you.</Text>
         <View style={[diag.keyBadge, { backgroundColor: 'rgba(48,209,88,0.15)', borderColor: 'rgba(48,209,88,0.3)' }]}>
-          <Text style={[diag.keyBadgeText, { color: Colors.secondary }]}>PUBLIC</Text>
+          <Text style={[diag.keyBadgeText, { color: colors.secondary }]}>PUBLIC</Text>
         </View>
       </View>
     </View>
   </View>
-);
+  );
+};
 
 // ─── Diagram: XRPL Validator Network ─────────────────────────────────────────
 
 const ValidatorDiagram = () => {
+  const { colors } = useTheme();
+  const diag = createDiag(colors);
   const nodes = [
     { label: 'Validator A', x: 0 },
     { label: 'Validator B', x: 1 },
     { label: 'Validator C', x: 2 },
     { label: 'Validator D', x: 3 },
   ];
-  const connections = [[0, 1], [1, 2], [2, 3], [0, 2], [1, 3]];
 
   return (
     <View style={diag.wrap}>
@@ -189,7 +203,10 @@ const ValidatorDiagram = () => {
 
 // ─── Diagram: Ledger Hardware Wallet ─────────────────────────────────────────
 
-const HardwareWalletDiagram = () => (
+const HardwareWalletDiagram = () => {
+  const { colors } = useTheme();
+  const diag = createDiag(colors);
+  return (
   <View style={diag.wrap}>
     <View style={diag.hwRow}>
       {/* Device */}
@@ -200,7 +217,7 @@ const HardwareWalletDiagram = () => (
         </View>
         <View style={diag.hwButtons}>
           <View style={diag.hwBtn}><Text style={diag.hwBtnTxt}>✗</Text></View>
-          <View style={[diag.hwBtn, { backgroundColor: Colors.primary }]}><Text style={diag.hwBtnTxt}>✓</Text></View>
+          <View style={[diag.hwBtn, { backgroundColor: colors.primary }]}><Text style={diag.hwBtnTxt}>✓</Text></View>
         </View>
         <Text style={diag.hwLabel}>Ledger Nano X</Text>
       </View>
@@ -224,7 +241,8 @@ const HardwareWalletDiagram = () => (
       Private key never leaves the device — only the signature does.
     </Text>
   </View>
-);
+  );
+};
 
 // ─── Section Component ────────────────────────────────────────────────────────
 
@@ -239,6 +257,8 @@ const Section = ({
   body: string;
   diagram: React.ReactNode;
 }) => {
+  const { colors } = useTheme();
+  const s = createS(colors);
   const [open, setOpen] = useState(true);
   return (
     <View style={s.section}>
@@ -261,16 +281,19 @@ const Section = ({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-const CryptoGuideScreen = ({ navigation }: any) => (
+const CryptoGuideScreen = ({ navigation }: any) => {
+  const { colors } = useTheme();
+  const s = createS(colors);
+  return (
   <SafeAreaView style={s.container}>
     <View style={s.header}>
-      <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn} activeOpacity={0.7}>
-        <Text style={s.backArrow}>‹</Text>
+      <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.7}>
+        <Text style={s.back}>{'<'}</Text>
       </TouchableOpacity>
-      <View>
+      <View style={s.headerTitleWrap} pointerEvents="none">
         <Text style={s.headerTitle}>Crypto Guide</Text>
-        <Text style={s.headerSub}>Blockchain & XRP from scratch</Text>
       </View>
+      <View style={{ width: 56 }} />
     </View>
 
     <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
@@ -344,13 +367,14 @@ const CryptoGuideScreen = ({ navigation }: any) => (
       </View>
     </ScrollView>
   </SafeAreaView>
-);
+  );
+};
 
 export default CryptoGuideScreen;
 
 // ─── Diagram Styles ───────────────────────────────────────────────────────────
 
-const diag = StyleSheet.create({
+const createDiag = (colors: ColorScheme) => StyleSheet.create({
   wrap: {
     marginTop: 16,
     alignItems: 'center',
@@ -366,21 +390,21 @@ const diag = StyleSheet.create({
     width: 88,
     backgroundColor: 'rgba(255, 83, 0, 0.08)',
     borderWidth: 1,
-    borderColor: Colors.primary,
+    borderColor: colors.primary,
     borderRadius: 10,
     padding: 10,
   },
   blockNum: {
     fontSize: 9,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   blockLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 6,
   },
   blockHashRow: {
@@ -390,12 +414,12 @@ const diag = StyleSheet.create({
   },
   hashLabel: {
     fontSize: 9,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
   },
   hashValue: {
     fontSize: 9,
-    color: Colors.primary,
+    color: colors.primary,
     fontFamily: 'monospace',
   },
   arrowCol: {
@@ -406,11 +430,11 @@ const diag = StyleSheet.create({
   arrowLine: {
     width: 12,
     height: 1.5,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
   },
   arrowHead: {
     fontSize: 12,
-    color: Colors.primary,
+    color: colors.primary,
     marginLeft: -2,
   },
 
@@ -431,7 +455,7 @@ const diag = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: 'rgba(255, 83, 0, 0.12)',
     borderWidth: 1.5,
-    borderColor: Colors.primary,
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
@@ -446,11 +470,11 @@ const diag = StyleSheet.create({
   nodeLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   nodeSub: {
     fontSize: 9,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 1,
   },
   flowArrow: {
@@ -461,12 +485,12 @@ const diag = StyleSheet.create({
   flowLine: {
     width: '100%',
     height: 1.5,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     opacity: 0.5,
   },
   flowArrowLabel: {
     fontSize: 8,
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '600',
     marginVertical: 2,
     letterSpacing: 0.3,
@@ -479,7 +503,7 @@ const diag = StyleSheet.create({
     borderLeftWidth: 6,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
-    borderLeftColor: Colors.primary,
+    borderLeftColor: colors.primary,
   },
   flowTimeline: {
     flexDirection: 'row',
@@ -491,7 +515,7 @@ const diag = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: Colors.textMuted,
+    backgroundColor: colors.textMuted,
   },
   timelineBar: {
     flex: 1,
@@ -506,7 +530,7 @@ const diag = StyleSheet.create({
   },
   tsLabel: {
     fontSize: 9,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
   },
 
@@ -533,19 +557,19 @@ const diag = StyleSheet.create({
   keyTitle: {
     fontSize: 12,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 4,
   },
   keyMono: {
     fontSize: 10,
-    color: Colors.primary,
+    color: colors.primary,
     fontFamily: 'monospace',
     marginBottom: 6,
     letterSpacing: 0.3,
   },
   keyDesc: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 14,
     marginBottom: 8,
@@ -567,7 +591,7 @@ const diag = StyleSheet.create({
   },
   keysArrowText: {
     fontSize: 12,
-    color: Colors.primary,
+    color: colors.primary,
     textAlign: 'center',
     fontWeight: '700',
     lineHeight: 18,
@@ -593,7 +617,7 @@ const diag = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: 'rgba(255, 83, 0, 0.12)',
     borderWidth: 1.5,
-    borderColor: Colors.primary,
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
@@ -601,11 +625,11 @@ const diag = StyleSheet.create({
   vLetter: {
     fontSize: 16,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
   },
   vLabel: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -632,7 +656,7 @@ const diag = StyleSheet.create({
   },
   consensusText: {
     fontSize: 11,
-    color: Colors.secondary,
+    color: colors.secondary,
     fontWeight: '700',
   },
 
@@ -648,13 +672,13 @@ const diag = StyleSheet.create({
     width: 90,
     backgroundColor: 'rgba(255, 83, 0, 0.08)',
     borderWidth: 1.5,
-    borderColor: Colors.primary,
+    borderColor: colors.primary,
     borderRadius: 14,
     padding: 10,
     alignItems: 'center',
   },
   hwScreen: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.background,
     borderRadius: 6,
     padding: 8,
     alignItems: 'center',
@@ -664,11 +688,11 @@ const diag = StyleSheet.create({
   hwScreenText: {
     fontSize: 11,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
   },
   hwScreenSub: {
     fontSize: 9,
-    color: Colors.primary,
+    color: colors.primary,
     marginTop: 2,
     fontWeight: '600',
   },
@@ -681,7 +705,7 @@ const diag = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: 'rgba(42, 42, 42, 0.6)',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -692,7 +716,7 @@ const diag = StyleSheet.create({
   },
   hwLabel: {
     fontSize: 9,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -703,12 +727,12 @@ const diag = StyleSheet.create({
   hwArrowLine: {
     width: '100%',
     height: 1.5,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     opacity: 0.5,
   },
   hwArrowLabel: {
     fontSize: 9,
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '700',
     marginVertical: 3,
   },
@@ -720,7 +744,7 @@ const diag = StyleSheet.create({
     borderLeftWidth: 6,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
-    borderLeftColor: Colors.primary,
+    borderLeftColor: colors.primary,
     alignSelf: 'flex-end',
   },
   hwPhone: {
@@ -741,14 +765,14 @@ const diag = StyleSheet.create({
   },
   hwPhoneApp: {
     fontSize: 9,
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '700',
     marginTop: 2,
   },
   hwCaption: {
     marginTop: 12,
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textAlign: 'center',
     fontStyle: 'italic',
     lineHeight: 15,
@@ -758,47 +782,33 @@ const diag = StyleSheet.create({
 
 // ─── Screen Styles ────────────────────────────────────────────────────────────
 
-const s = StyleSheet.create({
+const createS = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 24,
     paddingBottom: 16,
-    gap: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 83, 0, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 83, 0, 0.25)',
+  back: {
+    color: colors.textMuted,
+    fontSize: 16,
+  },
+  headerTitleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backArrow: {
-    fontSize: 26,
-    color: Colors.primary,
-    fontWeight: '300',
-    lineHeight: 30,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.text,
-    letterSpacing: -0.4,
-  },
-  headerSub: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    marginTop: 1,
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
   },
   content: {
     padding: 20,
@@ -806,10 +816,10 @@ const s = StyleSheet.create({
     gap: 12,
   },
   section: {
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -836,30 +846,30 @@ const s = StyleSheet.create({
   sectionNum: {
     fontSize: 10,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
     letterSpacing: 0.3,
   },
   sectionTitle: {
     flex: 1,
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -0.2,
   },
   sectionChevron: {
     fontSize: 18,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontWeight: '300',
   },
   sectionBody: {
     paddingHorizontal: 16,
     paddingBottom: 20,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(42, 42, 42, 0.4)',
+    borderTopColor: colors.border,
   },
   bodyText: {
     fontSize: 13,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     lineHeight: 20,
     marginTop: 14,
   },
@@ -873,7 +883,7 @@ const s = StyleSheet.create({
   },
   footerText: {
     fontSize: 12,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
   },

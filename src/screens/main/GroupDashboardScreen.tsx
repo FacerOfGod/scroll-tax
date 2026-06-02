@@ -15,16 +15,21 @@ import {
 import { groupService } from '../../services/GroupService';
 import { xrplService } from '../../services/XrplService';
 import { tokenService } from '../../services/TokenService';
-import { Colors } from '../../theme/colors';
+import { ScrollDetectionService } from '../../services/ScrollDetectionService';
+import { ColorScheme } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../services/AuthContext';
 import { RouteProp, useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MainStackParamList } from '../../types/navigation';
 import * as Keychain from 'react-native-keychain';
+import { treasuryService } from '../../services/TreasuryService';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 
 type GroupDashboardRouteProp = RouteProp<MainStackParamList, 'GroupDashboard'>;
 
 export default function GroupDashboardScreen() {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const route = useRoute<GroupDashboardRouteProp>();
   const navigation = useNavigation<any>();
   const { user } = useAuth();
@@ -44,10 +49,38 @@ export default function GroupDashboardScreen() {
     }, [groupId]),
   );
 
+  // Re-fetch after a penalty fires so the leaderboard updates without manual refresh.
+  // 2 s delay gives DashboardScreen's recordPenaltyRpc time to commit before we read.
+  useEffect(() => {
+    const sub = ScrollDetectionService.onPenalty(() => {
+      setTimeout(() => loadGroupDetails(), 2000);
+    });
+    return () => sub.remove();
+  }, [groupId]);
+
   const loadGroupDetails = async () => {
     const { data, error } = await groupService.fetchGroupDetails(groupId);
     if (!error && data) {
+      // For treasury-backed XRP groups, show each member's actual held balance
+      // from the treasury ledger (drops → XRP) rather than the legacy
+      // group_members.staked_amount field.
+      if (treasuryService.address && data.stake_type === 'xrp' && Array.isArray(data.members)) {
+        const balances = await groupService.getTreasuryBalances(groupId);
+        data.members = data.members.map((m: any) =>
+          balances[m.user_id] !== undefined
+            ? { ...m, staked_amount: balances[m.user_id] / 1e6 }
+            : m,
+        );
+      }
       setGroup(data);
+      // Push monitoring settings to the native service so detection works even if
+      // the user created the group and landed here without returning to Dashboard.
+      if (data.status === 'active' && data.banned_apps?.length > 0) {
+        // Push banned apps only — do NOT override thresholdSeconds here.
+        // DashboardScreen sets it to 30 s on focus; overriding with the
+        // group's penalty_trigger_time_minutes (30 min) would make testing impossible.
+        ScrollDetectionService.updateSettings({ bannedApps: data.banned_apps });
+      }
       // Animate content in after data arrives so the view is always mounted first
       contentAnim.setValue(0);
       Animated.timing(contentAnim, {
@@ -72,6 +105,19 @@ export default function GroupDashboardScreen() {
   const isCreator = user?.id === group?.creator_id;
 
   const handleJoin = async () => {
+    const hasAccess = await ScrollDetectionService.hasUsageAccess();
+    if (!hasAccess) {
+      Alert.alert(
+        'Permission Required',
+        'ScrollTax needs App Usage Access to monitor your screen time. Grant it before joining a group.',
+        [
+          { text: 'Open Settings', onPress: () => ScrollDetectionService.openUsageAccessSettings() },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+      return;
+    }
+
     const depositAmount = String(group.min_deposit);
     const isTokenGroup = group?.stake_type === 'tokens';
 
@@ -106,16 +152,23 @@ export default function GroupDashboardScreen() {
               text: 'Stake XRP',
               onPress: async () => {
                 try {
-                  await xrplService.sendXrp(seed, group.wallet_address, depositAmount);
-                  const { error } = await groupService.joinGroup(groupId, user.id, user.address || null, parseFloat(depositAmount));
-                  if (error) {
-                    Alert.alert('Error', (error as Error).message);
+                  if (treasuryService.address) {
+                    // Treasury path: become a member first (confirm_deposit
+                    // requires membership), then deposit the stake into the
+                    // custodial treasury (on-chain send + server-verified credit).
+                    const { error } = await groupService.joinGroup(groupId, user.id, user.address || null, parseFloat(depositAmount));
+                    if (error) throw error;
+                    await treasuryService.deposit(seed, groupId, depositAmount);
                   } else {
-                    Alert.alert('Joined!', `You've staked ${depositAmount} XRP. Welcome to "${group.name}".`);
-                    loadGroupDetails();
+                    // Legacy path: send to the group's wallet, then record membership.
+                    await xrplService.sendXrp(seed, group.wallet_address, depositAmount);
+                    const { error } = await groupService.joinGroup(groupId, user.id, user.address || null, parseFloat(depositAmount));
+                    if (error) throw error;
                   }
+                  Alert.alert('Joined!', `You've staked ${depositAmount} XRP. Welcome to "${group.name}".`);
+                  loadGroupDetails();
                 } catch (xrplError: any) {
-                  Alert.alert('Transaction Failed', xrplError?.message || 'Could not send XRP.');
+                  Alert.alert('Transaction Failed', xrplError?.message || 'Could not complete your stake.');
                 } finally {
                   setJoiningLoading(false);
                 }
@@ -198,21 +251,38 @@ export default function GroupDashboardScreen() {
   };
 
   const handleEndGroup = () => {
+    const useTreasury = !!treasuryService.address && group?.stake_type !== 'tokens';
     Alert.alert(
       'End Group',
-      'Mark this group as ended? Remaining balances should be manually redistributed from your XRPL wallet.',
+      useTreasury
+        ? 'End this group and pay each member their remaining staked balance back to their wallet?'
+        : 'Mark this group as ended? Remaining balances should be manually redistributed from your XRPL wallet.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'End Group',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await groupService.endGroup(groupId);
-            if (error) {
-              Alert.alert('Error', 'Could not end group.');
+            if (useTreasury) {
+              const res = await groupService.settleGroup(groupId);
+              if (!res.ok) {
+                Alert.alert(
+                  'Settlement Incomplete',
+                  res.error ||
+                    'Some payouts did not complete; the group is still active. Please retry.',
+                );
+              } else {
+                Alert.alert('Group Ended', 'Remaining balances were paid back to members.');
+                navigation.goBack();
+              }
             } else {
-              Alert.alert('Group Ended', 'The group has been marked as ended.');
-              navigation.goBack();
+              const { error } = await groupService.endGroup(groupId);
+              if (error) {
+                Alert.alert('Error', 'Could not end group.');
+              } else {
+                Alert.alert('Group Ended', 'The group has been marked as ended.');
+                navigation.goBack();
+              }
             }
           },
         },
@@ -230,7 +300,7 @@ export default function GroupDashboardScreen() {
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={Colors.primary} />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -283,6 +353,9 @@ export default function GroupDashboardScreen() {
         >
           <Text style={styles.backButton}>{'<'}</Text>
         </TouchableOpacity>
+        <View style={styles.headerTitleWrap} pointerEvents="none">
+          <Text style={styles.headerTitle}>{group.name}</Text>
+        </View>
         <View style={[styles.statusBadge, !isActive && styles.statusBadgeEnded]}>
           <Text style={[styles.statusBadgeText, !isActive && styles.statusBadgeTextEnded]}>
             {group.status.toUpperCase()}
@@ -296,7 +369,7 @@ export default function GroupDashboardScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderMember}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
           }
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={() => (
@@ -347,66 +420,67 @@ export default function GroupDashboardScreen() {
               </Text>
             </>
           )}
-          ListFooterComponent={() => (
-            <View style={styles.footer}>
-              {isUserMember && isActive && (
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={handleShare}
-                  activeOpacity={0.82}
-                >
-                  <Text style={styles.shareButtonText}>Share Invite Link</Text>
-                </TouchableOpacity>
-              )}
-
-              {!isUserMember && isActive && (
-                <TouchableOpacity
-                  style={[styles.actionButton, joiningLoading && { opacity: 0.7 }]}
-                  onPress={handleJoin}
-                  disabled={joiningLoading}
-                  activeOpacity={0.82}
-                >
-                  {joiningLoading ? (
-                    <ActivityIndicator color="#FFF" />
-                  ) : (
-                    <Text style={styles.actionButtonText}>
-                      Stake {group.min_deposit} {group.stake_type === 'tokens' ? 'Tokens' : 'XRP'} & Join
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              )}
-
-              {isCreator && isActive && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.dangerButton]}
-                  onPress={handleEndGroup}
-                  activeOpacity={0.82}
-                >
-                  <Text style={styles.actionButtonText}>End Group & Distribute Funds</Text>
-                </TouchableOpacity>
-              )}
-
-              {isCreator && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.deleteButton]}
-                  onPress={handleDeleteGroup}
-                  activeOpacity={0.82}
-                >
-                  <Text style={[styles.actionButtonText, { color: Colors.error }]}>Delete Group</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
         />
       </Animated.View>
+
+      {(isUserMember || !isUserMember || isCreator) && (
+        <View style={styles.bottomBar}>
+          {isUserMember && isActive && (
+            <TouchableOpacity
+              style={styles.shareButton}
+              onPress={handleShare}
+              activeOpacity={0.82}
+            >
+              <Text style={styles.shareButtonText}>Share Invite Link</Text>
+            </TouchableOpacity>
+          )}
+
+          {!isUserMember && isActive && (
+            <TouchableOpacity
+              style={[styles.actionButton, joiningLoading && { opacity: 0.7 }]}
+              onPress={handleJoin}
+              disabled={joiningLoading}
+              activeOpacity={0.82}
+            >
+              {joiningLoading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.actionButtonText}>
+                  Stake {group.min_deposit} {group.stake_type === 'tokens' ? 'Tokens' : 'XRP'} & Join
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {isCreator && isActive && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.dangerButton]}
+              onPress={handleEndGroup}
+              activeOpacity={0.82}
+            >
+              <Text style={styles.actionButtonText}>End Group & Distribute Funds</Text>
+            </TouchableOpacity>
+          )}
+
+          {isCreator && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.deleteButton]}
+              onPress={handleDeleteGroup}
+              activeOpacity={0.82}
+            >
+              <Text style={[styles.actionButtonText, { color: colors.error }]}>Delete Group</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   centered: {
     justifyContent: 'center',
@@ -416,16 +490,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: 24,
+    paddingTop: 24,
     paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(42, 42, 42, 0.5)',
   },
   backButton: {
-    color: Colors.primary,
+    color: colors.textMuted,
     fontSize: 16,
-    fontWeight: '600',
+  },
+  headerTitleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
   },
   statusBadge: {
     backgroundColor: 'rgba(48, 209, 88, 0.15)',
@@ -442,11 +524,11 @@ const styles = StyleSheet.create({
   statusBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.secondary,
+    color: colors.secondary,
     letterSpacing: 1,
   },
   statusBadgeTextEnded: {
-    color: Colors.textMuted,
+    color: colors.textMuted,
   },
   listContent: {
     padding: 20,
@@ -455,7 +537,7 @@ const styles = StyleSheet.create({
   groupName: {
     fontSize: 28,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 20,
     letterSpacing: -0.5,
   },
@@ -466,12 +548,12 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -481,17 +563,17 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 22,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
   },
   statLabel: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     marginTop: 2,
     fontWeight: '600',
   },
   statUnit: {
     fontSize: 10,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -506,42 +588,31 @@ const styles = StyleSheet.create({
   },
   walletLabel: {
     fontSize: 11,
-    color: Colors.primary,
+    color: colors.primary,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   walletAddress: {
     fontSize: 13,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontFamily: 'monospace',
   },
   leaderboardTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 12,
     letterSpacing: -0.2,
   },
   memberCard: {
-    backgroundColor: Colors.surface,
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(42, 42, 42, 0.6)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
-    elevation: 2,
   },
   memberCardMe: {
-    borderColor: 'rgba(255, 83, 0, 0.4)',
-    backgroundColor: 'rgba(255, 83, 0, 0.06)',
   },
   memberLeft: {
     flexDirection: 'row',
@@ -557,11 +628,11 @@ const styles = StyleSheet.create({
   memberId: {
     fontWeight: '700',
     fontSize: 15,
-    color: Colors.text,
+    color: colors.text,
   },
   memberAddress: {
     fontSize: 11,
-    color: Colors.textMuted,
+    color: colors.textMuted,
     fontFamily: 'monospace',
     maxWidth: 120,
     marginTop: 2,
@@ -572,17 +643,19 @@ const styles = StyleSheet.create({
   },
   stakedText: {
     fontSize: 13,
-    color: Colors.secondary,
+    color: colors.secondary,
     fontWeight: '600',
   },
   penaltyText: {
     fontSize: 12,
-    color: Colors.error,
+    color: colors.error,
     fontWeight: '600',
   },
-  footer: {
-    gap: 12,
-    marginTop: 16,
+  bottomBar: {
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   shareButton: {
     backgroundColor: 'rgba(255, 83, 0, 0.1)',
@@ -593,24 +666,24 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 83, 0, 0.4)',
   },
   shareButtonText: {
-    color: Colors.primary,
+    color: colors.primary,
     fontSize: 16,
     fontWeight: '700',
   },
   actionButton: {
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     padding: 12,
     borderRadius: 9999,
     alignItems: 'center',
-    shadowColor: Colors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 4,
   },
   dangerButton: {
-    backgroundColor: Colors.error,
-    shadowColor: Colors.error,
+    backgroundColor: colors.error,
+    shadowColor: colors.error,
   },
   deleteButton: {
     backgroundColor: 'rgba(255, 69, 58, 0.08)',
@@ -635,7 +708,7 @@ const styles = StyleSheet.create({
   },
   appsLabel: {
     fontSize: 11,
-    color: Colors.secondary,
+    color: colors.secondary,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -656,6 +729,6 @@ const styles = StyleSheet.create({
   appChipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: Colors.secondary,
+    color: colors.secondary,
   },
 });
