@@ -18,19 +18,50 @@ type XrplNetwork = keyof typeof XRPL_ENDPOINTS;
 const NETWORK: XrplNetwork = XRPL_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
 const XRPL_WSS_URL = XRPL_ENDPOINTS[NETWORK];
 
+// Bound every network interaction so a dead/slow node can never hang the app:
+//   - requestTimeout  : per round-trip request to rippled
+//   - connectionTimeout: how long to wait for the websocket to open
+//   - connect retries  : transient connect failures get a few backed-off attempts
+const REQUEST_TIMEOUT_MS = 20000;
+const CONNECT_TIMEOUT_MS = 15000;
+const CONNECT_MAX_RETRIES = 3;
+
 class XrplService {
   client: Client;
   readonly network: XrplNetwork = NETWORK;
   readonly isMainnet: boolean = NETWORK === 'mainnet';
 
   constructor() {
-    this.client = new Client(XRPL_WSS_URL);
+    this.client = new Client(XRPL_WSS_URL, {
+      timeout: REQUEST_TIMEOUT_MS,
+      connectionTimeout: CONNECT_TIMEOUT_MS,
+    });
   }
 
+  // Connect with bounded retries. connectionTimeout guarantees connect() rejects
+  // instead of hanging, so the loop can back off and retry. Connecting is
+  // money-safe to retry (it sends no transaction).
   async ensureConnected() {
-    if (!this.client.isConnected()) {
-      await this.client.connect();
+    if (this.client.isConnected()) return;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < CONNECT_MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      }
+      try {
+        await this.client.connect();
+        return;
+      } catch (err) {
+        lastErr = err;
+        // connect() can leave the socket half-open; reset before the next attempt.
+        try {
+          if (this.client.isConnected()) await this.client.disconnect();
+        } catch {
+          /* ignore */
+        }
+      }
     }
+    throw lastErr instanceof Error ? lastErr : new Error('XRPL connect failed');
   }
 
   async disconnect() {

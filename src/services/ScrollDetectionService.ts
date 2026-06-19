@@ -16,7 +16,11 @@ export const ScrollDetectionService = {
     ScrollDetection?.stopMonitoring?.();
   },
 
-  updateSettings: (config: { thresholdSeconds?: number; bannedApps?: string[] }) => {
+  updateSettings: (config: {
+    thresholdSeconds?: number;
+    bannedApps?: string[];
+    borderEnabled?: boolean;
+  }) => {
     ScrollDetection?.updateSettings?.(config);
   },
 
@@ -31,6 +35,38 @@ export const ScrollDetectionService = {
       return;
     }
     ScrollDetection.openUsageAccessSettings();
+  },
+
+  /** Whether "display over other apps" is granted (required for the red-border overlay). */
+  hasOverlayPermission: (): Promise<boolean> => {
+    if (!ScrollDetection?.hasOverlayPermission) return Promise.resolve(false);
+    return ScrollDetection.hasOverlayPermission();
+  },
+
+  openOverlaySettings: () => {
+    if (!ScrollDetection?.openOverlaySettings) {
+      console.warn('openOverlaySettings not available — rebuild native app');
+      return;
+    }
+    ScrollDetection.openOverlaySettings();
+  },
+
+  /**
+   * Whether the app is exempt from Doze battery optimization. When false, the OS
+   * can suspend the foreground monitor during deep sleep, missing penalties — so
+   * prompt the user to exempt the app for reliable 24/7 accountability.
+   */
+  isIgnoringBatteryOptimizations: (): Promise<boolean> => {
+    if (!ScrollDetection?.isIgnoringBatteryOptimizations) return Promise.resolve(true);
+    return ScrollDetection.isIgnoringBatteryOptimizations();
+  },
+
+  openBatteryOptimizationSettings: () => {
+    if (!ScrollDetection?.openBatteryOptimizationSettings) {
+      console.warn('openBatteryOptimizationSettings not available — rebuild native app');
+      return;
+    }
+    ScrollDetection.openBatteryOptimizationSettings();
   },
 
   showNotification: (title: string, body: string) => {

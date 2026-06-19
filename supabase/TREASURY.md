@@ -16,6 +16,7 @@ group end pays each member their remaining balance back on-chain.
 | Ledger schema + RPCs | `migrations/20260602000001_treasury_ledger.sql` |
 | Penalty redistribution (in `record_penalty`) | `migrations/20260602000002_treasury_penalty_redistribution.sql` |
 | Reconcile support (hash + index) | `migrations/20260602000003_treasury_reconciliation.sql` |
+| Settlement state machine (`begin_settlement`, penalty row lock) | `migrations/20260602000004_settlement_state_machine.sql` |
 | Edge function (deposit / balance / payout / settle_group / reconcile) | `functions/treasury/index.ts` |
 | Client | `src/services/TreasuryService.ts` |
 | On-chain proofs | `scripts/treasury-testnet-demo.mjs`, `scripts/treasury-multisign-demo.mjs` |
@@ -69,10 +70,21 @@ End-to-end through the app (with `TREASURY_ADDRESS` set):
 3. Trigger a penalty → offender's ledger balance drops, others' rise (no tx).
 4. Creator ends the group → each member is paid their balance on-chain.
 
+## Settlement lifecycle
+
+Groups move `active → settling → ended`. `settle_group` first calls
+`begin_settlement` to atomically flip `active → settling`; `record_penalty` takes a
+row lock on the group and only proceeds while `active`, so penalties can never
+mutate balances mid-settlement. A partial/timed-out settlement stays `settling`
+(penalties stay frozen) and is finished by re-invoking `settle_group` — payouts are
+idempotent per member, so resuming never double-pays.
+
 ## Caveats
 
 - **Reconcile needs a full-history XRPL node** (`XRPL_RPC_URL`); a pruning node
   could mis-read a validated-but-pruned payout as missing and re-credit it.
+- **Schedule the reconcile cron** (`reconcile-cron.sql`) per environment — without
+  it, payouts left `pending` after the poll window are never resolved.
 - The edge function imports `xrpl` from esm.sh — validate it in the edge runtime;
   fall back to `ripple-keypairs` + `ripple-binary-codec` if the bundle misbehaves.
 - Production: split `TREASURY_SIGNER_SEEDS` across separate KMS/HSM stores and

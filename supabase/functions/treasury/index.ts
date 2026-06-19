@@ -14,7 +14,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { Wallet, multisign } from 'https://esm.sh/xrpl@4.6.0'
+import { Wallet, multisign, isValidClassicAddress } from 'https://esm.sh/xrpl@4.6.0'
 
 const XRPL_HTTP = Deno.env.get('XRPL_RPC_URL') ?? 'https://s.altnet.rippletest.net:51234'
 const TREASURY_ADDRESS = Deno.env.get('TREASURY_ADDRESS') ?? ''
@@ -32,6 +32,21 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { ...CORS, 'Content-Type': 'application/json' },
   })
+
+// ─── Input validation ────────────────────────────────────────────────────────
+// A real-money treasury must never submit a malformed payout or credit a deposit
+// from an unverifiable hash. These guards are deliberately strict.
+
+// A valid drops amount is a positive integer that fits in IEEE-754 without loss.
+// XRPL's theoretical max (1e17 drops) exceeds Number.MAX_SAFE_INTEGER, so any
+// amount we can safely arithmetic on is well under it — isSafeInteger is the
+// correct, stricter bound and rules out overflow/precision corruption.
+const isValidDrops = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isSafeInteger(n) && n > 0
+
+// XRPL transaction hashes are 64 uppercase hex characters.
+const isValidTxHash = (h: unknown): h is string =>
+  typeof h === 'string' && /^[0-9A-Fa-f]{64}$/.test(h)
 
 // ─── XRPL JSON-RPC helpers ───────────────────────────────────────────────────
 async function rpc(method: string, params: Record<string, unknown>) {
@@ -188,8 +203,11 @@ serve(async (req: Request) => {
 
     const { group_id, user_id, destination, amount_drops, kind, idempotency_key } = body
     if (!group_id || !user_id || !destination || !idempotency_key ||
-        !Number.isInteger(amount_drops) || amount_drops <= 0) {
+        !isValidDrops(amount_drops)) {
       return json({ ok: false, error: 'invalid_params' }, 400)
+    }
+    if (!isValidClassicAddress(destination)) {
+      return json({ ok: false, error: 'invalid_destination' }, 400)
     }
 
     const r = await doPayout(admin, {
@@ -271,9 +289,11 @@ serve(async (req: Request) => {
   }
 
   // ─── settle_group ──────────────────────────────────────────────────────────
-  // Group creator ends the group: pay each member's remaining held balance back
-  // to their wallet on-chain, then mark the group ended. Idempotent per member
-  // (groupend:<group>:<user>), so a retry never double-pays.
+  // Group creator ends the group: claim settlement (active→settling, freezing out
+  // concurrent penalties), pay each member's remaining held balance back to their
+  // wallet on-chain, then mark the group ended once ALL payouts settle. Idempotent
+  // per member (groupend:<group>:<user>), so a retry/resume never double-pays; a
+  // partial settlement stays 'settling' until a later call finishes it.
   if (action === 'settle_group') {
     if (!TREASURY_SEED && SIGNER_SEEDS.length === 0) {
       return json({ ok: false, error: 'treasury_key_missing' }, 500)
@@ -285,7 +305,19 @@ serve(async (req: Request) => {
       .from('groups').select('creator_id, status').eq('id', group_id).maybeSingle()
     if (!group) return json({ ok: false, error: 'group_not_found' }, 404)
     if (group.creator_id !== user.id) return json({ ok: false, error: 'forbidden' }, 403)
-    if (group.status !== 'active') return json({ ok: false, error: 'group_not_active' }, 400)
+    // 'settling' is accepted so a partial/timed-out settlement can be safely
+    // resumed (payouts are idempotent); 'ended' is already done.
+    if (group.status !== 'active' && group.status !== 'settling') {
+      return json({ ok: false, error: 'group_not_active' }, 400)
+    }
+
+    // Atomically claim settlement: flips active→settling so concurrent penalties
+    // are frozen out (record_penalty rejects any non-'active' status under a row
+    // lock). Idempotent — resuming an already-'settling' group is fine.
+    if (group.status === 'active') {
+      const { error: beginErr } = await admin.rpc('begin_settlement', { p_group_id: group_id })
+      if (beginErr) return json({ ok: false, error: 'settlement_claim_failed' }, 500)
+    }
 
     const { data: rows } = await admin
       .from('treasury_ledger')
@@ -305,9 +337,21 @@ serve(async (req: Request) => {
         payouts.push({ user_id: row.user_id, ok: false, error: 'no_wallet' })
         continue
       }
+      // A corrupted/typo'd wallet_address would otherwise fail on-chain and strand
+      // the member's balance as 'pending'. Reject up front so it's visible and the
+      // balance stays cleanly reserved for a later corrected payout.
+      if (!isValidClassicAddress(destination)) {
+        payouts.push({ user_id: row.user_id, ok: false, error: 'invalid_wallet' })
+        continue
+      }
+      const amount_drops = Number(row.balance_drops)
+      if (!isValidDrops(amount_drops)) {
+        payouts.push({ user_id: row.user_id, ok: false, error: 'invalid_balance' })
+        continue
+      }
       const r = await doPayout(admin, {
         group_id, user_id: row.user_id, destination,
-        amount_drops: Number(row.balance_drops),
+        amount_drops,
         kind: 'group_end_payout',
         idempotency_key: `groupend:${group_id}:${row.user_id}`,
       })
@@ -325,7 +369,7 @@ serve(async (req: Request) => {
   // ─── confirm_deposit ───────────────────────────────────────────────────────
   if (action === 'confirm_deposit') {
     const { group_id, tx_hash } = body
-    if (!group_id || !tx_hash) return json({ ok: false, error: 'invalid_params' }, 400)
+    if (!group_id || !isValidTxHash(tx_hash)) return json({ ok: false, error: 'invalid_params' }, 400)
 
     // Caller must be an active member, and we use their on-file wallet to ensure
     // they can only claim deposits sent from their own account.

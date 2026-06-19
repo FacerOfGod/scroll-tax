@@ -55,9 +55,15 @@ react {
 }
 
 /**
- * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ * Run R8/ProGuard on release builds to shrink + obfuscate the bytecode. Enabled
+ * for production: smaller binary and harder to reverse-engineer the on-device
+ * wallet/treasury code paths. Keep rules live in proguard-rules.pro.
+ *
+ * NOTE: an obfuscated release build MUST be smoke-tested end-to-end (wallet
+ * generation, deposit, settlement, Ledger BLE) before shipping — a missing keep
+ * rule only surfaces at runtime in the minified APK, never in debug.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -91,8 +97,8 @@ android {
         applicationId "com.scrolltax"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.0.2-beta"
+        versionCode 4
+        versionName "1.0.2"
     }
     signingConfigs {
         debug {

@@ -14,4 +14,7 @@ declare module '@env' {
   // are deposited into. The treasury SEED is a server-only function secret and is
   // never bundled in the app.
   export const TREASURY_ADDRESS: string;
+  // Sentry DSN for crash reporting. Optional — when unset, crash reporting is a
+  // no-op (dev/CI never phone home). The DSN is a publishable (non-secret) value.
+  export const SENTRY_DSN: string;
 }

@@ -9,6 +9,8 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -38,9 +40,37 @@ class ScrollDetectionModule(reactContext: ReactApplicationContext) : ReactContex
 
     @ReactMethod
     fun stopMonitoring() {
+        // Clear the intended-state flag first so BootReceiver / onTaskRemoved don't
+        // resurrect the service after a deliberate stop.
+        reactApplicationContext.getSharedPreferences("ScrollTaxPrefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("monitoringActive", false).apply()
         val intent = Intent(reactApplicationContext, ScrollDetectionService::class.java)
         reactApplicationContext.stopService(intent)
         Log.d("ScrollDetection", "stopMonitoring called")
+    }
+
+    /** Whether the app is exempt from Doze battery optimization (needed for reliable 24/7 monitoring). */
+    @ReactMethod
+    fun isIgnoringBatteryOptimizations(promise: Promise) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            promise.resolve(true)
+            return
+        }
+        val pm = reactApplicationContext.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        promise.resolve(pm.isIgnoringBatteryOptimizations(reactApplicationContext.packageName))
+    }
+
+    /**
+     * Opens the system battery-optimization list so the user can exempt ScrollTax.
+     * Uses the settings *list* screen (not the Play-restricted direct-request
+     * intent / REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission), keeping the app
+     * compliant with Google Play policy.
+     */
+    @ReactMethod
+    fun openBatteryOptimizationSettings() {
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        reactApplicationContext.startActivity(intent)
     }
 
     @ReactMethod
@@ -62,8 +92,31 @@ class ScrollDetectionModule(reactContext: ReactApplicationContext) : ReactContex
             }
             // Empty array → skip write so the stored list (or built-in defaults) is preserved
         }
+        if (config.hasKey("borderEnabled")) {
+            editor.putBoolean("borderModeEnabled", config.getBoolean("borderEnabled"))
+            Log.d("ScrollDetection", "borderModeEnabled set to ${config.getBoolean("borderEnabled")}")
+        }
         editor.apply()
         Log.d("ScrollDetection", "Settings updated")
+    }
+
+    /** Whether the "draw over other apps" permission is granted (needed for the border overlay). */
+    @ReactMethod
+    fun hasOverlayPermission(promise: Promise) {
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            Settings.canDrawOverlays(reactApplicationContext)
+        promise.resolve(granted)
+    }
+
+    /** Opens the system "display over other apps" settings screen for this app. */
+    @ReactMethod
+    fun openOverlaySettings() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:" + reactApplicationContext.packageName)
+        )
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        reactApplicationContext.startActivity(intent)
     }
 
     @ReactMethod
@@ -154,6 +207,8 @@ class ScrollDetectionModule(reactContext: ReactApplicationContext) : ReactContex
     companion object {
         private var instance: ScrollDetectionModule? = null
         private val notificationIdSeq = AtomicInteger(2000)
+        // Cap on the offline pending-penalty queue (oldest dropped past this).
+        private const val MAX_PENDING_PENALTIES = 200
 
         fun emitScrollEvent(pkg: String) = emit("onScrollEvent", pkg)
 
@@ -183,8 +238,14 @@ class ScrollDetectionModule(reactContext: ReactApplicationContext) : ReactContex
                     val entry = if (seed != null) signEntry(seed, payload) else payload
                     val prefs = module.reactApplicationContext.getSharedPreferences("ScrollTaxPrefs", Context.MODE_PRIVATE)
                     val existing = prefs.getString("pendingPenalties", "") ?: ""
-                    val updated = if (existing.isEmpty()) entry else "$existing;$entry"
-                    prefs.edit().putString("pendingPenalties", updated).apply()
+                    val combined = if (existing.isEmpty()) entry else "$existing;$entry"
+                    // Bound the queue: a long offline stretch must not grow
+                    // SharedPreferences without limit. Keep the most recent entries.
+                    val parts = combined.split(";")
+                    val bounded = if (parts.size > MAX_PENDING_PENALTIES)
+                        parts.takeLast(MAX_PENDING_PENALTIES).joinToString(";")
+                    else combined
+                    prefs.edit().putString("pendingPenalties", bounded).apply()
                     Log.d("ScrollDetection", "Queued penalty: $payload signed=${seed != null}")
                 }
             }

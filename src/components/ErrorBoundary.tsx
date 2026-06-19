@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../theme/colors';
+import { captureException } from '../services/crashReporting';
 
 interface Props {
   children: React.ReactNode;
@@ -15,9 +16,8 @@ interface State {
  * so an uncaught exception shows a recoverable fallback instead of a blank crash.
  *
  * It sits outside every provider (including ThemeContext), so it cannot use the
- * theme hook and pins the static dark palette. Errors are logged here — this is
- * the single hook point to wire a crash reporter (e.g. Sentry.captureException)
- * once one is configured.
+ * theme hook and pins the static dark palette. Errors are logged here and
+ * forwarded to the crash reporter (no-op until SENTRY_DSN is configured).
  */
 class ErrorBoundary extends React.Component<Props, State> {
   state: State = { error: null };
@@ -27,8 +27,8 @@ class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // TODO(observability): forward to crash reporter once configured.
     console.error('Unhandled error caught by ErrorBoundary:', error, info.componentStack);
+    captureException(error, { componentStack: info.componentStack });
   }
 
   reset = () => this.setState({ error: null });
