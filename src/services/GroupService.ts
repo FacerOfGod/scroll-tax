@@ -23,9 +23,11 @@ class GroupService {
 
       if (error) throw error;
 
-      // Add the creator as a member automatically
+      // Add the creator as a member automatically. The join RPC reads the stake
+      // (min_deposit) from the group itself and exempts the creator from a token
+      // debit, so no amount is passed from the client.
       if (data) {
-        await this.joinGroup(data.id, details.creator_id, details.wallet_address, details.min_deposit);
+        await this.joinGroup(data.id, details.wallet_address);
       }
 
       return { data, error: null };
@@ -35,24 +37,23 @@ class GroupService {
     }
   }
 
-  async joinGroup(
-    groupId: string,
-    userId: string,
-    walletAddress: string | null,
-    stakedAmount: number = 0,
-  ) {
+  /**
+   * Join (or auto-add the creator to) a group. Membership is created server-side
+   * by the join_group RPC: it sets staked_amount authoritatively from the group's
+   * min_deposit (never client-supplied) and, for a token group, debits the stake
+   * in the same transaction. The signed-in user is taken from auth.uid(), so no
+   * userId is passed. On failure the RPC returns an error code
+   * (insufficient_tokens / already_member / rejoin_not_allowed / …).
+   */
+  async joinGroup(groupId: string, walletAddress: string | null) {
     try {
-      const { error } = await supabase
-        .from('group_members')
-        .insert([{
-          group_id: groupId,
-          user_id: userId,
-          wallet_address: walletAddress,
-          staked_amount: stakedAmount,
-        }]);
-
+      const { data, error } = await supabase.rpc('join_group', {
+        p_group_id: groupId,
+        p_wallet: walletAddress,
+      });
       if (error) throw error;
-      return { data: null, error: null };
+      if (!data?.ok) throw new Error(data?.error ?? 'join_failed');
+      return { data, error: null };
     } catch (error) {
       console.error('Error joining group:', error);
       return { data: null, error };
@@ -81,14 +82,26 @@ class GroupService {
 
   async fetchGroupDetails(groupId: string) {
     try {
-      const { data: groupData, error: groupError } = await supabase
+      // Members + creator can read the group row directly (invite-only RLS).
+      let { data: groupData, error: groupError } = await supabase
         .from('groups')
         .select('*')
         .eq('id', groupId)
-        .single();
+        .maybeSingle();
 
       if (groupError) throw groupError;
 
+      // A prospective joiner (not yet a member) is hidden by RLS — fall back to
+      // the narrow by-id lookup that returns only the joinable fields.
+      if (!groupData) {
+        const { data: joinData, error: joinError } = await supabase
+          .rpc('get_group_for_join', { p_group_id: groupId });
+        if (joinError) throw joinError;
+        groupData = Array.isArray(joinData) ? joinData[0] : joinData;
+        if (!groupData) throw new Error('group_not_found');
+      }
+
+      // Returns the full list for members; [] for a prospective joiner (RLS).
       const { data: membersData, error: membersError } = await supabase
         .from('group_members')
         .select('*')
@@ -96,44 +109,17 @@ class GroupService {
 
       if (membersError) throw membersError;
 
-      return { data: { ...groupData, members: membersData }, error: null };
+      return { data: { ...groupData, members: membersData ?? [] }, error: null };
     } catch (error) {
       console.error('Error fetching group details:', error);
       return { data: null, error };
     }
   }
 
-  async recordPenalty(userId: string, groupId: string, amount: number) {
-    try {
-      const { data: memberData, error: memberFetchError } = await supabase
-        .from('group_members')
-        .select('*')
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-        .single();
-
-      if (memberFetchError) throw memberFetchError;
-
-      const newStakedAmount = Math.max(0, memberData.staked_amount - amount);
-      const newPenalties = (memberData.penalties_incurred || 0) + amount;
-
-      const { data, error } = await supabase
-        .from('group_members')
-        .update({
-          staked_amount: newStakedAmount,
-          penalties_incurred: newPenalties,
-        })
-        .eq('id', memberData.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data, error: null };
-    } catch (error) {
-      console.error('Error recording penalty:', error);
-      return { data: null, error };
-    }
-  }
+  // Penalties are recorded exclusively through recordPenaltyRpc() →
+  // record_penalty (SECURITY DEFINER), which reads the penalty amount from the
+  // group server-side and updates staked_amount / penalties_incurred. Clients can
+  // no longer write those columns directly, so there is no client-side variant.
 
   async getGroupMembers(groupId: string) {
     try {

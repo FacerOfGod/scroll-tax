@@ -7,7 +7,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- specialUse (not dataSync): usage monitoring must run continuously, but the
+         dataSync FGS type is capped at ~6h/day on Android 15+ (targetSdk 36). The
+         specialUse type fits "monitor foreground app usage for screen-time
+         accountability" and is declared to Play (see Play Console FGS declaration). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Draw the red-border warning overlay on top of banned apps -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Bluetooth (API < 31 legacy) -->
@@ -50,8 +54,15 @@
       </activity>
       <service
         android:name=".ScrollDetectionService"
-        android:foregroundServiceType="dataSync"
-        android:exported="false" />
+        android:foregroundServiceType="specialUse"
+        android:exported="false">
+        <!-- Play Console FGS declaration must justify this value. The service polls
+             UsageStatsManager to enforce the user's screen-time accountability stakes
+             in real time; no other FGS type covers continuous usage monitoring. -->
+        <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="Monitors foreground app usage to enforce user-configured screen-time accountability commitments." />
+      </service>
       <receiver
         android:name=".BootReceiver"
         android:enabled="true"

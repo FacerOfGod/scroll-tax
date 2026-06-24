@@ -10,7 +10,6 @@ import {
   Alert,
   RefreshControl,
   ActivityIndicator,
-  PermissionsAndroid,
   Platform,
   Animated,
   AppState,
@@ -21,6 +20,7 @@ import {
   UIManager,
   KeyboardAvoidingView,
 } from 'react-native';
+import { usePermissions } from '../../context/PermissionsContext';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ColorScheme } from '../../theme/colors';
@@ -415,6 +415,7 @@ const DashboardScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const { user, signOut, refreshTokenBalance } = useAuth();
+  const { usageAccessGranted, refresh: refreshPermissions } = usePermissions();
   const [balance, setBalance]             = useState<string | null>(null);
   const [penaltyCount, setPenaltyCount]   = useState(0);
   const [penaltyCost, setPenaltyCost]     = useState(0);
@@ -424,8 +425,6 @@ const DashboardScreen = ({ navigation }: any) => {
   const [copied, setCopied]               = useState(false);
   const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
   const [hasActiveGroup, setHasActiveGroup]   = useState(false);
-  const [usageAccessGranted, setUsageAccessGranted] = useState(true);
-  const [notifPermGranted, setNotifPermGranted]     = useState(true);
   const [inAppNotif, setInAppNotif] = useState<{ title: string; body: string } | null>(null);
   const showInAppNotif = (title: string, body: string) => setInAppNotif({ title, body });
   const [xrpPrices, setXrpPrices] = useState<{ usd: number; eur: number; chf: number } | null>(null);
@@ -547,17 +546,9 @@ const DashboardScreen = ({ navigation }: any) => {
       // not the SharedPrefs default of 5 s that applies until the async DB call finishes.
       ScrollDetectionService.updateSettings({ thresholdSeconds: 30 });
 
-      // Check usage access
-      ScrollDetectionService.hasUsageAccess().then(granted => setUsageAccessGranted(granted));
-
-      // Request notification permission (Android 13+). Using request() so the
-      // OS prompts the user on first launch rather than relying on them tapping the banner.
-      if (Platform.OS === 'android' && Platform.Version >= 33) {
-        PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
-          .then(result => setNotifPermGranted(result === PermissionsAndroid.RESULTS.GRANTED));
-      } else {
-        setNotifPermGranted(true);
-      }
+      // Re-check usage access + notifications (state lives in PermissionsContext,
+      // which also drives the Settings-tab attention dot).
+      refreshPermissions();
 
       groupService.getActiveGroupForUser(user.id).then(({ data, error }) => {
         if (error) return;
@@ -575,7 +566,7 @@ const DashboardScreen = ({ navigation }: any) => {
           ScrollDetectionService.updateSettings({ bannedApps });
         }
       });
-    }, [user?.id]),
+    }, [user?.id, refreshPermissions]),
   );
 
   // Pulse animation for active-group indicator
@@ -714,8 +705,8 @@ const DashboardScreen = ({ navigation }: any) => {
         }).catch(err => console.warn('Failed to re-push banned-apps settings:', err));
 
         // Check if usage access was revoked while away. If so, forfeit the user's stake.
+        // (PermissionsContext also re-checks on foreground; this read drives the forfeit.)
         ScrollDetectionService.hasUsageAccess().then(async granted => {
-          setUsageAccessGranted(granted);
           if (!granted && activeGroupIdRef.current) {
             const groupId = activeGroupIdRef.current;
             activeGroupIdRef.current = null;
@@ -1150,6 +1141,13 @@ const DashboardScreen = ({ navigation }: any) => {
                 <TouchableOpacity onPress={handleCopyAddress} activeOpacity={0.6} style={styles.copyButton}>
                   <Text style={styles.copyButtonText}>{copied ? 'Copied' : 'Copy'}</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('WalletBackup')}
+                  activeOpacity={0.6}
+                  style={styles.copyButton}
+                >
+                  <Text style={styles.copyButtonText}>Back up</Text>
+                </TouchableOpacity>
               </View>
               <View style={styles.cardFooter}>
                 <PixelWave active={isRefreshingBalance} />
@@ -1310,125 +1308,12 @@ const DashboardScreen = ({ navigation }: any) => {
         )}
 
 
-        {/* Permission warnings */}
-        {!usageAccessGranted && (
-          <TouchableOpacity
-            style={styles.permissionBox}
-            onPress={() => ScrollDetectionService.openUsageAccessSettings()}
-            activeOpacity={0.75}
-          >
-            <Text style={styles.permissionIcon}>🔍</Text>
-            <View style={styles.permissionText}>
-              <Text style={styles.permissionTitle}>Usage Access required</Text>
-              <Text style={styles.permissionSub}>Tap to enable so ScrollTax can detect banned apps</Text>
-            </View>
-            <Text style={styles.permissionChevron}>›</Text>
-          </TouchableOpacity>
-        )}
+        {/* Permission warnings now live on the Settings tab (with an attention dot). */}
 
-        {!notifPermGranted && (
-          <TouchableOpacity
-            style={styles.permissionBox}
-            onPress={() => {
-              if (Platform.OS === 'android' && Platform.Version >= 33) {
-                PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS)
-                  .then(result => setNotifPermGranted(result === PermissionsAndroid.RESULTS.GRANTED));
-              }
-            }}
-            activeOpacity={0.75}
-          >
-            <Text style={styles.permissionIcon}>🔔</Text>
-            <View style={styles.permissionText}>
-              <Text style={styles.permissionTitle}>Notifications off</Text>
-              <Text style={styles.permissionSub}>Tap to enable penalty alerts</Text>
-            </View>
-            <Text style={styles.permissionChevron}>›</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Quick Actions */}
+        {/* Network status — primary navigation now lives in the bottom tab bar */}
         <Animated.View
           style={{ opacity: actionsAnim.opacity, transform: [{ translateY: actionsAnim.translateY }] }}
         >
-          <View style={styles.divider} />
-          <View style={styles.actionsList}>
-            <TouchableOpacity
-              style={styles.actionBar}
-              onPress={() => navigation.navigate('Groups')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.actionIcon, { color: colors.primary }]}>◉◉</Text>
-              <View style={styles.actionBarText}>
-                <Text style={styles.actionLabel}>My Groups</Text>
-                <Text style={styles.actionSub}>View & manage</Text>
-              </View>
-              {hasActiveGroup && (
-                <Animated.View style={[styles.activeGroupDot, { opacity: pulseAnim }]} />
-              )}
-              <Text style={styles.actionChevron}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.actionBarDivider} />
-
-            <TouchableOpacity
-              style={styles.actionBar}
-              onPress={() => navigation.navigate('CreateGroup')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.actionIcon, { color: colors.primary }]}>⊕</Text>
-              <View style={styles.actionBarText}>
-                <Text style={styles.actionLabel}>New Group</Text>
-                <Text style={styles.actionSub}>Start an accountability group</Text>
-              </View>
-              <Text style={styles.actionChevron}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.actionBarDivider} />
-
-            <TouchableOpacity
-              style={styles.actionBar}
-              onPress={() => navigation.navigate('SelfBets')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.actionIcon, { color: colors.primary }]}>◆</Text>
-              <View style={styles.actionBarText}>
-                <Text style={styles.actionLabel}>Bet on Yourself</Text>
-                <Text style={styles.actionSub}>GitHub, Strava, Chess.com & LeetCode goals</Text>
-              </View>
-              <Text style={styles.actionChevron}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.actionBarDivider} />
-
-            <TouchableOpacity
-              style={styles.actionBar}
-              onPress={() => navigation.navigate('DistractionSettings')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.actionIcon, { color: colors.primary }]}>⚙</Text>
-              <View style={styles.actionBarText}>
-                <Text style={styles.actionLabel}>Tracking</Text>
-                <Text style={styles.actionSub}>App & threshold settings</Text>
-              </View>
-              <Text style={styles.actionChevron}>›</Text>
-            </TouchableOpacity>
-
-            <View style={styles.actionBarDivider} />
-
-            <TouchableOpacity
-              style={styles.actionBar}
-              onPress={() => navigation.navigate('CryptoGuide')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.actionIcon, { color: colors.primary }]}>⬡</Text>
-              <View style={styles.actionBarText}>
-                <Text style={styles.actionLabel}>Crypto Guide</Text>
-                <Text style={styles.actionSub}>How blockchain & XRP work</Text>
-              </View>
-              <Text style={styles.actionChevron}>›</Text>
-            </TouchableOpacity>
-          </View>
-
           {/* Testnet notice */}
           <View style={styles.networkBadge}>
             <View style={styles.networkDot} />
@@ -1503,7 +1388,7 @@ const DashboardScreen = ({ navigation }: any) => {
 const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: 'transparent',
   },
   content: {
     padding: 20,
@@ -1779,40 +1664,6 @@ const createStyles = (colors: ColorScheme) => StyleSheet.create({
     color: colors.textMuted,
     fontWeight: '500',
   },
-  permissionBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 159, 10, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 159, 10, 0.35)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-    gap: 10,
-  },
-  permissionIcon: {
-    fontSize: 18,
-  },
-  permissionText: {
-    flex: 1,
-  },
-  permissionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  permissionSub: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 1,
-  },
-  permissionChevron: {
-    fontSize: 20,
-    color: colors.primary,
-    opacity: 0.7,
-  },
-
   // ─── Wallet tabs ────────────────────────────────────────────────────────────
   walletTabRow: {
     flexDirection: 'row',

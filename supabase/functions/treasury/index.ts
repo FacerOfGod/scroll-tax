@@ -21,6 +21,21 @@ const TREASURY_ADDRESS = Deno.env.get('TREASURY_ADDRESS') ?? ''
 const TREASURY_SEED = Deno.env.get('TREASURY_SEED') ?? ''
 const ADMIN_SECRET = Deno.env.get('TREASURY_ADMIN_SECRET') ?? ''
 
+// ─── Mainnet custody / reconciliation safety switches ────────────────────────
+// Off by default to preserve the testnet single-key slice; operators set these for
+// real-money mainnet (see .env.example).
+//
+// REQUIRE_MULTISIG: refuse to sign unless the treasury is multisig (TREASURY_SIGNER_
+// SEEDS set) AND the on-chain account has its master key disabled with a SignerList
+// installed — so no single leaked seed can ever move treasury funds.
+const REQUIRE_MULTISIG = (Deno.env.get('TREASURY_REQUIRE_MULTISIG') ?? '') === 'true'
+// REQUIRE_FULL_HISTORY: refuse to reconcile unless XRPL_RPC_URL is a full-history
+// node — a pruned node could report a validated-but-pruned payout as missing and we
+// would wrongly re-credit it (a double-spend). HISTORY_FLOOR_LEDGER is the highest
+// "earliest ledger" the node may report (mainnet's earliest available is 32570).
+const REQUIRE_FULL_HISTORY = (Deno.env.get('TREASURY_REQUIRE_FULL_HISTORY') ?? '') === 'true'
+const HISTORY_FLOOR_LEDGER = Number(Deno.env.get('TREASURY_HISTORY_FLOOR_LEDGER') ?? '32570')
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -62,6 +77,18 @@ async function lookupTx(hash: string) {
   return rpc('tx', { transaction: hash, binary: false })
 }
 
+// Parse a rippled `complete_ledgers` string ("32570-91234567", "a-b,c-d", or
+// "empty"). Returns true only for a single contiguous range starting at/below the
+// floor — i.e. genuine full history with no pruning gaps. Any gap (multiple ranges)
+// or a recent-only start means the node has pruned and is unsafe for reconcile.
+function isFullHistory(completeLedgers: unknown, floor: number): boolean {
+  if (typeof completeLedgers !== 'string' || completeLedgers === 'empty') return false
+  const ranges = completeLedgers.split(',').map(s => s.trim()).filter(Boolean)
+  if (ranges.length !== 1) return false
+  const start = Number(ranges[0].split('-')[0])
+  return Number.isFinite(start) && start <= floor
+}
+
 // Submit a treasury payout from the omnibus account. If TREASURY_SIGNER_SEEDS is
 // set (comma-separated, >= quorum), the payout is MULTISIGNED by those signer
 // keys; otherwise it is single-signed with TREASURY_SEED. Reserves are taken
@@ -69,12 +96,37 @@ async function lookupTx(hash: string) {
 const SIGNER_SEEDS = (Deno.env.get('TREASURY_SIGNER_SEEDS') ?? '')
   .split(',').map(s => s.trim()).filter(Boolean)
 
+// lsfDisableMaster — the account's master key pair is disabled (XRPL account flag).
+const LSF_DISABLE_MASTER = 0x00100000
+
+// Mainnet custody invariant (REQUIRE_MULTISIG): the treasury must be multisig-only —
+// signed by TREASURY_SIGNER_SEEDS, with the on-chain account's master key disabled
+// and a SignerList installed — so no single leaked seed can move funds. Throws
+// (refusing to sign) if the invariant is violated; doPayout treats that as a failed
+// submit and safely re-credits the reserve. No-op on testnet (flag unset).
+function assertCustodySafe(acctData: any, useMultisign: boolean): void {
+  if (!REQUIRE_MULTISIG) return
+  if (!useMultisign) throw new Error('custody_single_key_forbidden')
+  const flags = Number(acctData?.Flags ?? 0)
+  // eslint-disable-next-line no-bitwise -- bitmask is the correct test for an XRPL account flag
+  if ((flags & LSF_DISABLE_MASTER) === 0) throw new Error('custody_master_key_enabled')
+  const signerLists = acctData?.signer_lists
+  if (!Array.isArray(signerLists) || signerLists.length === 0) {
+    throw new Error('custody_no_signer_list')
+  }
+}
+
 async function sendFromTreasury(destination: string, amountDrops: string) {
   const useMultisign = SIGNER_SEEDS.length > 0
 
-  const acct = await rpc('account_info', { account: TREASURY_ADDRESS, ledger_index: 'current' })
+  // signer_lists:true so the custody pre-flight can confirm the SignerList on-chain.
+  const acct = await rpc('account_info', {
+    account: TREASURY_ADDRESS, ledger_index: 'current', signer_lists: true,
+  })
   const sequence = acct?.account_data?.Sequence
   if (sequence === undefined) throw new Error('treasury_account_not_found')
+  // Refuse to sign before building/submitting the tx if custody is unsafe.
+  assertCustodySafe(acct?.account_data, useMultisign)
 
   const ledger = await rpc('ledger_current', {})
   const currentLedger = ledger?.ledger_current_index ?? 0
@@ -228,6 +280,23 @@ serve(async (req: Request) => {
   if (action === 'reconcile') {
     if (!ADMIN_SECRET || req.headers.get('X-Treasury-Admin') !== ADMIN_SECRET) {
       return json({ ok: false, error: 'forbidden' }, 403)
+    }
+    // Full-history pre-flight: a pruned node could report a validated-but-pruned
+    // payout as missing, which we'd wrongly re-credit (double-spend). Refuse to run
+    // unless the node provably holds full history. (No-op on testnet — flag unset.)
+    if (REQUIRE_FULL_HISTORY) {
+      let completeLedgers: unknown
+      try {
+        completeLedgers = (await rpc('server_info', {}))?.info?.complete_ledgers
+      } catch {
+        return json({ ok: false, error: 'reconcile_node_check_failed' }, 503)
+      }
+      if (!isFullHistory(completeLedgers, HISTORY_FLOOR_LEDGER)) {
+        return json(
+          { ok: false, error: 'reconcile_node_not_full_history', complete_ledgers: completeLedgers },
+          503,
+        )
+      }
     }
     const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString()
     const { data: pending } = await admin

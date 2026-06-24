@@ -221,7 +221,7 @@ const ConnectedAccountsScreen = ({ navigation }: any) => {
 
 const createStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
+    container: { flex: 1, backgroundColor: 'transparent' },
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',

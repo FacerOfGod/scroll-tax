@@ -17,13 +17,23 @@ import {
 import { useAuth } from '../../services/AuthContext';
 import { groupService } from '../../services/GroupService';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
-import { MainStackParamList } from '../../types/navigation';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import {
+  useNavigation,
+  useIsFocused,
+  CompositeNavigationProp,
+} from '@react-navigation/native';
+import { MainStackParamList, MainTabParamList } from '../../types/navigation';
 import { ColorScheme } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
 
-type NavigationProp = StackNavigationProp<MainStackParamList, 'Groups'>;
+// Groups lives in the bottom tab bar but pushes full-screen stack routes
+// (GroupDashboard, CreateGroup), so its navigation prop spans both navigators.
+type NavigationProp = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Groups'>,
+  StackNavigationProp<MainStackParamList>
+>;
 
 export default function GroupsScreen() {
   const { colors } = useTheme();
@@ -155,12 +165,7 @@ export default function GroupsScreen() {
           { opacity: headerAnim.opacity, transform: [{ translateY: headerAnim.translateY }] },
         ]}
       >
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text style={styles.backButton}>{'<'}</Text>
-        </TouchableOpacity>
+        <View style={{ width: 56, height: 24 }} />
         <View style={styles.headerTitleWrap} pointerEvents="none">
           <Text style={styles.headerTitle}>My Groups</Text>
         </View>
@@ -278,7 +283,7 @@ export default function GroupsScreen() {
 const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: 'transparent',
   },
   header: {
     paddingHorizontal: 24,

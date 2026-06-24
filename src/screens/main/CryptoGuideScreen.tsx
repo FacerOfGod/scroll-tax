@@ -287,9 +287,7 @@ const CryptoGuideScreen = ({ navigation }: any) => {
   return (
   <SafeAreaView style={s.container}>
     <View style={s.header}>
-      <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} activeOpacity={0.7}>
-        <Text style={s.back}>{'<'}</Text>
-      </TouchableOpacity>
+      <View style={{ width: 56, height: 24 }} />
       <View style={s.headerTitleWrap} pointerEvents="none">
         <Text style={s.headerTitle}>Crypto Guide</Text>
       </View>
@@ -785,7 +783,7 @@ const createDiag = (colors: ColorScheme) => StyleSheet.create({
 const createS = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',

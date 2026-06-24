@@ -24,6 +24,7 @@ import { MainStackParamList } from '../../types/navigation';
 import * as Keychain from 'react-native-keychain';
 import { treasuryService } from '../../services/TreasuryService';
 import { useEntranceAnimation } from '../../hooks/useEntranceAnimation';
+import ShareIcon from '../../components/icons/ShareIcon';
 
 type GroupDashboardRouteProp = RouteProp<MainStackParamList, 'GroupDashboard'>;
 
@@ -156,13 +157,13 @@ export default function GroupDashboardScreen() {
                     // Treasury path: become a member first (confirm_deposit
                     // requires membership), then deposit the stake into the
                     // custodial treasury (on-chain send + server-verified credit).
-                    const { error } = await groupService.joinGroup(groupId, user.id, user.address || null, parseFloat(depositAmount));
+                    const { error } = await groupService.joinGroup(groupId, user.address || null);
                     if (error) throw error;
                     await treasuryService.deposit(seed, groupId, depositAmount);
                   } else {
                     // Legacy path: send to the group's wallet, then record membership.
                     await xrplService.sendXrp(seed, group.wallet_address, depositAmount);
-                    const { error } = await groupService.joinGroup(groupId, user.id, user.address || null, parseFloat(depositAmount));
+                    const { error } = await groupService.joinGroup(groupId, user.address || null);
                     if (error) throw error;
                   }
                   Alert.alert('Joined!', `You've staked ${depositAmount} XRP. Welcome to "${group.name}".`);
@@ -202,12 +203,17 @@ export default function GroupDashboardScreen() {
               text: 'Stake Tokens',
               onPress: async () => {
                 try {
-                  await tokenService.deductTokens(user!.id, required);
-                  const { error } = await groupService.joinGroup(groupId, user!.id, user?.address || null, required);
+                  // join_group debits the token stake and creates the membership
+                  // atomically server-side — no separate deduct/refund dance.
+                  const { error } = await groupService.joinGroup(groupId, user?.address || null);
                   if (error) {
-                    // Refund tokens if DB write failed
-                    await tokenService.addTokens(user!.id, required);
-                    Alert.alert('Error', (error as Error).message);
+                    const code = (error as Error).message;
+                    Alert.alert(
+                      'Error',
+                      code === 'insufficient_tokens'
+                        ? `Insufficient tokens for this stake (need ${required}).`
+                        : code,
+                    );
                   } else {
                     Alert.alert('Joined!', `You've staked ${depositAmount} Tokens. Welcome to "${group.name}".`);
                     loadGroupDetails();
@@ -354,7 +360,7 @@ export default function GroupDashboardScreen() {
           <Text style={styles.backButton}>{'<'}</Text>
         </TouchableOpacity>
         <View style={styles.headerTitleWrap} pointerEvents="none">
-          <Text style={styles.headerTitle}>{group.name}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{group.name}</Text>
         </View>
         <View style={[styles.statusBadge, !isActive && styles.statusBadgeEnded]}>
           <Text style={[styles.statusBadgeText, !isActive && styles.statusBadgeTextEnded]}>
@@ -374,8 +380,6 @@ export default function GroupDashboardScreen() {
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={() => (
             <>
-              <Text style={styles.groupName}>{group.name}</Text>
-
               <View style={styles.statsRow}>
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{group.min_deposit}</Text>
@@ -429,15 +433,16 @@ export default function GroupDashboardScreen() {
             <TouchableOpacity
               style={styles.shareButton}
               onPress={handleShare}
-              activeOpacity={0.82}
+              activeOpacity={0.6}
             >
-              <Text style={styles.shareButtonText}>Share Invite Link</Text>
+              <ShareIcon size={16} color={colors.textMuted} />
+              <Text style={styles.shareButtonText}>Share</Text>
             </TouchableOpacity>
           )}
 
           {!isUserMember && isActive && (
             <TouchableOpacity
-              style={[styles.actionButton, joiningLoading && { opacity: 0.7 }]}
+              style={[styles.actionButton, styles.joinButton, joiningLoading && { opacity: 0.7 }]}
               onPress={handleJoin}
               disabled={joiningLoading}
               activeOpacity={0.82}
@@ -452,24 +457,26 @@ export default function GroupDashboardScreen() {
             </TouchableOpacity>
           )}
 
-          {isCreator && isActive && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.dangerButton]}
-              onPress={handleEndGroup}
-              activeOpacity={0.82}
-            >
-              <Text style={styles.actionButtonText}>End Group & Distribute Funds</Text>
-            </TouchableOpacity>
-          )}
-
           {isCreator && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.deleteButton]}
-              onPress={handleDeleteGroup}
-              activeOpacity={0.82}
-            >
-              <Text style={[styles.actionButtonText, { color: colors.error }]}>Delete Group</Text>
-            </TouchableOpacity>
+            <View style={styles.bottomBarRight}>
+              <TouchableOpacity
+                style={styles.ghostButton}
+                onPress={handleDeleteGroup}
+                activeOpacity={0.6}
+              >
+                <Text style={[styles.ghostButtonText, { color: colors.error }]}>Delete</Text>
+              </TouchableOpacity>
+
+              {isActive && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.dangerButton]}
+                  onPress={handleEndGroup}
+                  activeOpacity={0.82}
+                >
+                  <Text style={styles.actionButtonText}>End Group</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
       )}
@@ -480,7 +487,7 @@ export default function GroupDashboardScreen() {
 const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: 'transparent',
   },
   centered: {
     justifyContent: 'center',
@@ -499,10 +506,9 @@ const createStyles = (colors: ColorScheme) => StyleSheet.create({
     fontSize: 16,
   },
   headerTitleWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
+    flex: 1,
+    marginLeft: 12,
+    alignItems: 'flex-start',
   },
   headerTitle: {
     fontSize: 20,
@@ -533,13 +539,6 @@ const createStyles = (colors: ColorScheme) => StyleSheet.create({
   listContent: {
     padding: 20,
     paddingBottom: 40,
-  },
-  groupName: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: 20,
-    letterSpacing: -0.5,
   },
   statsRow: {
     flexDirection: 'row',
@@ -652,49 +651,65 @@ const createStyles = (colors: ColorScheme) => StyleSheet.create({
     fontWeight: '600',
   },
   bottomBar: {
-    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 16,
   },
-  shareButton: {
-    backgroundColor: 'rgba(255, 83, 0, 0.1)',
-    padding: 12,
-    borderRadius: 9999,
+  bottomBarRight: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 83, 0, 0.4)',
+    gap: 4,
+    marginLeft: 'auto',
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
   },
   shareButtonText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: '700',
+    color: colors.textMuted,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  ghostButton: {
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ghostButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   actionButton: {
     backgroundColor: colors.primary,
-    padding: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 18,
     borderRadius: 9999,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  joinButton: {
+    flex: 1,
   },
   dangerButton: {
     backgroundColor: colors.error,
     shadowColor: colors.error,
   },
-  deleteButton: {
-    backgroundColor: 'rgba(255, 69, 58, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 69, 58, 0.3)',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
   actionButtonText: {
     color: '#FFF',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
   },
   appsBox: {

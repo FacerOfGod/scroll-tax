@@ -42,7 +42,32 @@ select cron.schedule(
   $$
 );
 
--- To inspect or remove the schedule later:
---   select * from cron.job where jobname = 'treasury-reconcile';
+-- ── Self-bet refund reconcile ───────────────────────────────────────────────
+-- XRP self-bet WIN refunds are paid from the same treasury and can likewise be left
+-- 'settling' (submitted but unconfirmed). The `self-bet` edge function exposes the
+-- same admin `reconcile` action (same TREASURY_ADMIN_SECRET, same full-history rule)
+-- over self_bets. Schedule it too. Store its URL in Vault first (replace the value):
+--   select vault.create_secret('https://<PROJECT_REF>.supabase.co/functions/v1/self-bet',
+--                              'self_bet_function_url');
+select cron.schedule(
+  'self-bet-reconcile',
+  '*/10 * * * *',
+  $$
+    select net.http_post(
+      url     := (select decrypted_secret from vault.decrypted_secrets
+                  where name = 'self_bet_function_url'),
+      headers := jsonb_build_object(
+        'Content-Type',     'application/json',
+        'X-Treasury-Admin', (select decrypted_secret from vault.decrypted_secrets
+                             where name = 'treasury_admin_secret')
+      ),
+      body    := jsonb_build_object('action', 'reconcile')
+    );
+  $$
+);
+
+-- To inspect or remove the schedules later:
+--   select * from cron.job where jobname in ('treasury-reconcile', 'self-bet-reconcile');
 --   select * from cron.job_run_details order by start_time desc limit 20;
 --   select cron.unschedule('treasury-reconcile');
+--   select cron.unschedule('self-bet-reconcile');

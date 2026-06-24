@@ -1,11 +1,15 @@
 import { supabase } from './supabaseClient';
 
 class TokenService {
-  /** Upsert a user_profiles row with 100 tokens if it doesn't exist yet. */
-  async ensureProfile(userId: string): Promise<void> {
-    const { error } = await supabase
-      .from('user_profiles')
-      .upsert({ user_id: userId, tokens: 100 }, { onConflict: 'user_id', ignoreDuplicates: true });
+  /**
+   * Ensure the signed-in user has a profile row (with the server-controlled
+   * starting balance). Provisioning is server-side: a trigger creates the row on
+   * sign-up and this RPC self-heals any session whose row is missing. Clients can
+   * never write `tokens` directly. The userId arg is advisory — the RPC acts on
+   * auth.uid().
+   */
+  async ensureProfile(_userId: string): Promise<void> {
+    const { error } = await supabase.rpc('ensure_profile');
     if (error) console.warn('TokenService.ensureProfile error:', error.message);
   }
 
@@ -36,11 +40,10 @@ class TokenService {
     }
   }
 
-  /** Atomically add tokens to the signed-in user's balance. */
-  async addTokens(_userId: string, amount: number): Promise<void> {
-    const { error } = await supabase.rpc('adjust_tokens', { p_delta: amount });
-    if (error) throw new Error(error.message);
-  }
+  // NOTE: there is intentionally no client-side credit method. Token credits
+  // (penalty redistribution, self-bet wins, the atomic group-join stake) all
+  // happen inside SECURITY DEFINER RPCs — adjust_tokens rejects positive deltas
+  // so a client can never mint tokens.
 }
 
 export const tokenService = new TokenService();

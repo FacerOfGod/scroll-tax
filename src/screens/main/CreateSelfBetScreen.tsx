@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import * as Keychain from 'react-native-keychain';
 import { ColorScheme } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../services/AuthContext';
@@ -72,20 +73,49 @@ const CreateSelfBetScreen = ({ navigation }: any) => {
       stakeType,
       walletAddress: stakeType === 'xrp' ? user?.address : null,
     });
-    setSubmitting(false);
 
-    if (res.ok) {
-      if (stakeType === 'tokens') await refreshTokenBalance();
-      Alert.alert('Bet placed', `Stake locked. Hit your goal before the deadline to win it back.`);
-      navigation.replace('SelfBets');
-    } else {
+    if (!res.ok) {
+      setSubmitting(false);
       Alert.alert(
         'Could not place bet',
         res.error === 'insufficient_tokens'
           ? 'You don\'t have enough tokens for this stake.'
           : res.error || 'Try again.',
       );
+      return;
     }
+
+    // XRP bets escrow the stake into the treasury now (Gate 0C) — send it on-chain
+    // and confirm before the bet counts as funded.
+    if (res.needs_deposit && res.bet_id) {
+      const creds = user
+        ? await Keychain.getGenericPassword({ service: `xrpl-${user.id}` })
+        : null;
+      if (!creds) {
+        setSubmitting(false);
+        return Alert.alert(
+          'Wallet key missing',
+          'The bet was created but not funded. Open it from Self Bets to complete the deposit.',
+        );
+      }
+      const dep = await selfBetService.depositEscrow(creds.password, res.bet_id, String(stakeNum));
+      setSubmitting(false);
+      if (!dep.ok) {
+        return Alert.alert(
+          'Deposit failed',
+          `${dep.error ?? 'Try again.'}\n\nThe bet was created but isn't funded yet — open it from Self Bets to retry the deposit.`,
+        );
+      }
+      Alert.alert('Bet funded', 'Your XRP stake is escrowed. Hit your goal before the deadline to get it back.');
+      navigation.goBack();
+      return;
+    }
+
+    // Token bet — stake already locked server-side.
+    setSubmitting(false);
+    await refreshTokenBalance();
+    Alert.alert('Bet placed', 'Stake locked. Hit your goal before the deadline to win it back.');
+    navigation.goBack();
   };
 
   if (loadingAccounts) {
@@ -210,7 +240,7 @@ const CreateSelfBetScreen = ({ navigation }: any) => {
                 <Text style={styles.infoText}>
                   {stakeType === 'tokens'
                     ? 'Your stake is locked now. Hit the goal in time and it returns to your balance — miss it and it\'s forfeited.'
-                    : 'Nothing moves now. If you miss the goal, the stake is sent to the app wallet on-chain. Hit it and you keep everything.'}
+                    : 'Your stake is escrowed to the app treasury now. Hit the goal in time and it\'s refunded to your wallet — miss it and it\'s forfeited.'}
                 </Text>
               </View>
 
@@ -235,7 +265,7 @@ const CreateSelfBetScreen = ({ navigation }: any) => {
 
 const createStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
+    container: { flex: 1, backgroundColor: 'transparent' },
     content: { padding: 24, paddingBottom: 40 },
     header: {
       flexDirection: 'row',

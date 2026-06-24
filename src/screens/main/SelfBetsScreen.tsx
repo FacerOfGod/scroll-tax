@@ -14,7 +14,6 @@ import * as Keychain from 'react-native-keychain';
 import { ColorScheme } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../services/AuthContext';
-import { xrplService } from '../../services/XrplService';
 import {
   selfBetService,
   PROVIDER_META,
@@ -71,7 +70,29 @@ const SelfBetsScreen = ({ navigation }: any) => {
     setRefreshing(false);
   };
 
-  // Settle a bet (wins early if the goal is met, loses if the deadline passed).
+  // Fund an XRP bet's escrow deposit into the treasury (also used to retry a deposit
+  // that failed at create time).
+  const completeDeposit = async (bet: SelfBet) => {
+    if (!user) return;
+    setChecking(bet.id);
+    const creds = await Keychain.getGenericPassword({ service: `xrpl-${user.id}` });
+    if (!creds) {
+      setChecking(null);
+      Alert.alert('Wallet key missing', 'Sign out and back in, then try again.');
+      return;
+    }
+    const dep = await selfBetService.depositEscrow(creds.password, bet.id, String(bet.stake_amount));
+    setChecking(null);
+    if (!dep.ok) {
+      Alert.alert('Deposit failed', dep.error ?? 'Try again.');
+      return;
+    }
+    Alert.alert('Bet funded', 'Your XRP stake is escrowed.');
+    load();
+  };
+
+  // Settle a bet (wins early if the goal is met, loses if the deadline passed). XRP
+  // settlement is server-driven from the treasury — the device never sends funds.
   const check = async (bet: SelfBet) => {
     setChecking(bet.id);
     const res = await selfBetService.settleBet(bet.id);
@@ -82,27 +103,22 @@ const SelfBetsScreen = ({ navigation }: any) => {
       return;
     }
 
-    if (res.settled) {
-      // XRP loss: the device sends the forfeit on-chain itself.
-      if (res.xrp_forfeit && user) {
-        try {
-          const creds = await Keychain.getGenericPassword({ service: `xrpl-${user.id}` });
-          if (creds) {
-            await xrplService.sendXrp(
-              creds.password, res.xrp_forfeit.dest, String(res.xrp_forfeit.amount),
-            );
-          }
-        } catch (e) {
-          console.warn('XRP forfeit send failed:', e);
-        }
+    if (res.awaiting_deposit) {
+      Alert.alert('Deposit needed', 'This XRP bet isn\'t funded yet. Tap "Fund deposit" to activate it.');
+    } else if (res.settled) {
+      const won = res.status === 'won';
+      if (won && bet.stake_type === 'tokens') await refreshTokenBalance();
+      let msg: string;
+      if (!won) {
+        msg = 'The deadline passed without hitting the goal. Stake forfeited.';
+      } else if (bet.stake_type !== 'xrp') {
+        msg = 'Goal reached — your stake is back.';
+      } else if (res.refund?.ok) {
+        msg = 'Goal reached — your XRP stake was refunded on-chain.';
+      } else {
+        msg = 'Goal reached — your XRP refund is processing and will arrive shortly.';
       }
-      if (res.status === 'won' && bet.stake_type === 'tokens') await refreshTokenBalance();
-      Alert.alert(
-        res.status === 'won' ? '🎉 You won!' : 'Bet lost',
-        res.status === 'won'
-          ? 'Goal reached — your stake is back.'
-          : 'The deadline passed without hitting the goal. Stake forfeited.',
-      );
+      Alert.alert(won ? '🎉 You won!' : 'Bet lost', msg);
     } else {
       const p = res.progress ?? 0;
       Alert.alert('Still going', `${p}/${bet.target_count} ${bet.metric}. ${fmtRemaining(bet.period_end)}.`);
@@ -114,6 +130,8 @@ const SelfBetsScreen = ({ navigation }: any) => {
   const renderBet = (bet: SelfBet) => {
     const meta = PROVIDER_META[bet.provider];
     const p = progress[bet.id];
+    const needsDeposit =
+      bet.status === 'active' && bet.stake_type === 'xrp' && bet.escrow_status === 'pending';
     const current = p?.progress ?? (bet.final_value != null ? bet.final_value - bet.baseline : 0);
     const pct = Math.max(0, Math.min(1, current / bet.target_count));
     const statusColor =
@@ -153,13 +171,13 @@ const SelfBetsScreen = ({ navigation }: any) => {
           {bet.status === 'active' && (
             <TouchableOpacity
               style={styles.checkBtn}
-              onPress={() => check(bet)}
+              onPress={() => (needsDeposit ? completeDeposit(bet) : check(bet))}
               disabled={checking === bet.id}
             >
               {checking === bet.id ? (
                 <ActivityIndicator color="#FFF" size="small" />
               ) : (
-                <Text style={styles.checkBtnText}>Check now</Text>
+                <Text style={styles.checkBtnText}>{needsDeposit ? 'Fund deposit' : 'Check now'}</Text>
               )}
             </TouchableOpacity>
           )}
@@ -171,9 +189,7 @@ const SelfBetsScreen = ({ navigation }: any) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.back}>{'<'}</Text>
-        </TouchableOpacity>
+        <View style={{ width: 56, height: 24 }} />
         <View style={styles.titleWrap} pointerEvents="none">
           <Text style={styles.title}>Self Bets</Text>
         </View>
@@ -209,7 +225,7 @@ const SelfBetsScreen = ({ navigation }: any) => {
 
 const createStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
+    container: { flex: 1, backgroundColor: 'transparent' },
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',

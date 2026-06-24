@@ -1,0 +1,47 @@
+# Cursor Rules — ScrollTax
+
+> Rules and context for Cursor AI. For full details, see `CLAUDE.md`.
+
+## Project
+
+React Native 0.84.1 (Android-only) + TypeScript app. Penalizes doomscrolling
+via XRPL crypto stakes. Kotlin foreground service monitors banned app usage.
+
+## Key Technology
+
+- React Native 0.84.1, TypeScript, React Navigation v7 (Stack)
+- XRPL (`xrpl` v4.6) — testnet by default
+- Supabase (PostgreSQL + Auth + RLS + Edge Functions)
+- `react-native-keychain` for wallet seed storage
+- `react-native-dotenv` for env vars (`@env` module)
+
+## File Layout
+
+- Screens: `src/screens/{auth,main,onboarding}/`
+- Services: `src/services/` — singleton pattern
+- Theme: `src/theme/colors.ts` + `src/context/ThemeContext.tsx`
+- Types: `src/types/navigation.ts`, `src/types/env.d.ts`
+- Utils: `src/utils/penaltySplit.ts` (drop-safe XRP math)
+- Native: `android/app/src/main/java/com/scrolltax/` (Kotlin)
+- Backend: `supabase/migrations/`, `supabase/functions/`
+
+## Rules
+
+### MUST
+
+- Use `const {colors} = useTheme()` for all colors
+- Use integer drops for XRP math (see `penaltySplit.ts`)
+- Store wallet seeds in Keychain only (`xrpl-{userId}`)
+- Check `error` from all Supabase calls
+- Add RLS policies to new tables
+- Add new screens to `MainStackParamList` and `RootNavigator.tsx`
+- Export services as singletons
+
+### MUST NOT
+
+- Modify `metro.config.js` polyfill/resolver config
+- Change import order in `index.js`
+- Use floating-point for XRP amounts
+- Store seeds in AsyncStorage, Supabase, or logs
+- Hardcode color values in components
+- Skip error handling on service methods

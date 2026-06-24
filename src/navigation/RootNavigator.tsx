@@ -1,23 +1,21 @@
 import React, {useEffect} from 'react';
-import {NavigationContainer} from '@react-navigation/native';
+import {NavigationContainer, DefaultTheme, DarkTheme} from '@react-navigation/native';
 import {createStackNavigator, CardStyleInterpolators} from '@react-navigation/stack';
 import {Linking} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
-import DashboardScreen from '../screens/main/DashboardScreen';
+import MainTabs from './MainTabs';
 import CreateGroupScreen from '../screens/main/CreateGroupScreen';
-import GroupsScreen from '../screens/main/GroupsScreen';
 import GroupDashboardScreen from '../screens/main/GroupDashboardScreen';
-import DistractionSettingsScreen from '../screens/main/DistractionSettingsScreen';
-import CryptoGuideScreen from '../screens/main/CryptoGuideScreen';
-import SelfBetsScreen from '../screens/main/SelfBetsScreen';
 import CreateSelfBetScreen from '../screens/main/CreateSelfBetScreen';
 import ConnectedAccountsScreen from '../screens/main/ConnectedAccountsScreen';
+import WalletBackupScreen from '../screens/main/WalletBackupScreen';
 import {useAuth, AuthProvider} from '../services/AuthContext';
 import {View, ActivityIndicator} from 'react-native';
 import {ThemeProvider, useTheme} from '../context/ThemeContext';
+import AnimatedBackground from '../components/AnimatedBackground';
 
 export const PENDING_INVITE_KEY = 'pendingJoinGroupId';
 
@@ -34,7 +32,17 @@ const Stack = createStackNavigator();
 
 const NavigationContent = () => {
   const {user, isLoading} = useAuth();
-  const {colors} = useTheme();
+  const {colors, isDark} = useTheme();
+
+  // Transparent navigation surfaces so the animated background shows through.
+  const navTheme = {
+    ...(isDark ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(isDark ? DarkTheme : DefaultTheme).colors,
+      background: 'transparent',
+      card: 'transparent',
+    },
+  };
 
   // Capture deep links when user is not authenticated — save for after login
   useEffect(() => {
@@ -69,18 +77,24 @@ const NavigationContent = () => {
 
   if (isLoading) {
     return (
-      <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background}}>
+      <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+        <AnimatedBackground />
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <NavigationContainer linking={linking}>
+    <View style={{flex: 1}}>
+      <AnimatedBackground />
+      <NavigationContainer linking={linking} theme={navTheme}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
+          cardStyle: {backgroundColor: 'transparent'},
           cardStyleInterpolator: CardStyleInterpolators.forFadeFromCenter,
+          cardOverlayEnabled: false,
+          cardOverlay: () => null,
           gestureEnabled: false,
           transitionSpec: {
             open: {animation: 'timing', config: {duration: 400}},
@@ -89,15 +103,12 @@ const NavigationContent = () => {
         }}>
         {user ? (
           <>
-            <Stack.Screen name="Main" component={DashboardScreen} />
-            <Stack.Screen name="Groups" component={GroupsScreen} />
+            <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="GroupDashboard" component={GroupDashboardScreen} />
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
-            <Stack.Screen name="DistractionSettings" component={DistractionSettingsScreen} />
-            <Stack.Screen name="CryptoGuide" component={CryptoGuideScreen} />
-            <Stack.Screen name="SelfBets" component={SelfBetsScreen} />
             <Stack.Screen name="CreateSelfBet" component={CreateSelfBetScreen} />
             <Stack.Screen name="ConnectedAccounts" component={ConnectedAccountsScreen} />
+            <Stack.Screen name="WalletBackup" component={WalletBackupScreen} />
           </>
         ) : (
           <>
@@ -107,7 +118,8 @@ const NavigationContent = () => {
           </>
         )}
       </Stack.Navigator>
-    </NavigationContainer>
+      </NavigationContainer>
+    </View>
   );
 };
 

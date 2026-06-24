@@ -31,6 +31,13 @@ class XrplService {
   readonly network: XrplNetwork = NETWORK;
   readonly isMainnet: boolean = NETWORK === 'mainnet';
 
+  // Single in-flight connect shared by all callers. The Client is a singleton,
+  // so without this, concurrent ensureConnected() calls race: one caller's
+  // failure cleanup can disconnect a socket another caller just established,
+  // which surfaces later as `NotConnectedError: Connection failed`. Serializing
+  // through one promise removes that race.
+  private connectPromise: Promise<void> | null = null;
+
   constructor() {
     this.client = new Client(XRPL_WSS_URL, {
       timeout: REQUEST_TIMEOUT_MS,
@@ -38,11 +45,21 @@ class XrplService {
     });
   }
 
-  // Connect with bounded retries. connectionTimeout guarantees connect() rejects
-  // instead of hanging, so the loop can back off and retry. Connecting is
-  // money-safe to retry (it sends no transaction).
+  // Connect with bounded retries, deduped across concurrent callers. Connecting
+  // is money-safe to retry (it sends no transaction).
   async ensureConnected() {
     if (this.client.isConnected()) return;
+    if (!this.connectPromise) {
+      this.connectPromise = this.connectWithRetry().finally(() => {
+        this.connectPromise = null;
+      });
+    }
+    return this.connectPromise;
+  }
+
+  // connectionTimeout guarantees connect() rejects instead of hanging, so the
+  // loop can back off and retry. Only ever runs one at a time (see ensureConnected).
+  private async connectWithRetry() {
     let lastErr: unknown;
     for (let attempt = 0; attempt < CONNECT_MAX_RETRIES; attempt++) {
       if (attempt > 0) {
@@ -53,9 +70,11 @@ class XrplService {
         return;
       } catch (err) {
         lastErr = err;
-        // connect() can leave the socket half-open; reset before the next attempt.
+        // A failed connect can leave the socket half-open; reset before the next
+        // attempt. Safe to call unconditionally — disconnect() no-ops when idle,
+        // and serialization means this never tears down another caller's socket.
         try {
-          if (this.client.isConnected()) await this.client.disconnect();
+          await this.client.disconnect();
         } catch {
           /* ignore */
         }
@@ -84,6 +103,20 @@ class XrplService {
   }
 
   /**
+   * Derive an XRPL wallet from a secret seed, returning its address/publicKey, or
+   * null if the seed is invalid. Used by the wallet backup/restore flow to validate
+   * a recovery key before importing it. Does no network I/O.
+   */
+  walletFromSeed(seed: string): { address: string; publicKey: string } | null {
+    try {
+      const wallet = Wallet.fromSeed(seed.trim());
+      return { address: wallet.address, publicKey: wallet.publicKey };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Fund a wallet from the Testnet faucet (Testnet only).
    * Returns the funded wallet with the new balance.
    */
@@ -109,6 +142,19 @@ class XrplService {
     } catch (error: any) {
       // Account not yet funded on testnet
       if (error?.data?.error === 'actNotFound' || error?.message?.includes('actNotFound')) {
+        return '0';
+      }
+      // Transient connectivity (node unreachable / socket dropped). Recoverable
+      // on the next refresh, so warn rather than surfacing a red error.
+      const msg: string = error?.message ?? '';
+      const isConnError =
+        error?.name === 'NotConnectedError' ||
+        error?.name === 'DisconnectedError' ||
+        msg.includes('connect') ||
+        msg.includes('socket') ||
+        msg.includes('timeout');
+      if (isConnError) {
+        console.warn('Balance fetch skipped — XRPL not reachable:', msg || error);
         return '0';
       }
       console.error('Error fetching balance:', error);

@@ -115,7 +115,7 @@ const OnboardingScreen = ({ navigation }: any) => {
 const createStyles = (colors: ColorScheme) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: 'transparent',
   },
   content: {
     flex: 1,
