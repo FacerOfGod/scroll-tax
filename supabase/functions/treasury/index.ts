@@ -14,7 +14,11 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { Wallet, multisign, isValidClassicAddress } from 'https://esm.sh/xrpl@4.6.0'
+// Imported via npm: (not esm.sh). esm.sh regenerates type declarations and ships a
+// broken @noble/hashes@1.8.0 dts (hmac.d.ts → "utils.ts.d.ts") that a transitively
+// fetched module still pulls in, failing the Deno module graph at boot. npm: uses
+// xrpl's own bundled types and resolves cleanly.
+import { Wallet, multisign, isValidClassicAddress } from 'npm:xrpl@4.6.0'
 
 const XRPL_HTTP = Deno.env.get('XRPL_RPC_URL') ?? 'https://s.altnet.rippletest.net:51234'
 const TREASURY_ADDRESS = Deno.env.get('TREASURY_ADDRESS') ?? ''

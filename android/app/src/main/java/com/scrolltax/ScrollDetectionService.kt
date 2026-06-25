@@ -22,6 +22,7 @@ import android.util.Log
 import android.util.TypedValue
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
@@ -41,7 +42,23 @@ class ScrollDetectionService : Service() {
     // Red-border overlay state (alternative to the warning notification)
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
+    private var overlayBorder: GradientDrawable? = null
     private var borderAnimator: ValueAnimator? = null
+
+    // Border thickness (dp): starts thin and grows toward [BORDER_MAX_DP] over the
+    // threshold window so the screen feels increasingly "boxed in".
+    private val BORDER_MIN_DP = 10
+    private val BORDER_MAX_DP = 48
+    // Rounded-corner radius (dp) for the border frame.
+    private val BORDER_CORNER_DP = 44
+    // One breathing cycle of the pulse, in ms.
+    private val PULSE_PERIOD_MS = 1300L
+    // How long the border takes to smoothly fade in when it first appears, in ms.
+    private val FADE_IN_MS = 600L
+    // How far back to replay UsageEvents when resolving the foreground app. Must be
+    // generous: a banned app the user is sitting in stops emitting events, so a short
+    // window lets its entry event age out and the app looks like it vanished.
+    private val FOREGROUND_LOOKBACK_MS = 10 * 60_000L
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -129,7 +146,8 @@ class ScrollDetectionService : Service() {
                     Log.d("ScrollDetection", "Penalty fired for $foreground (${elapsedSeconds}s)")
                 }
             }
-        } else {
+        } else if (foreground != null) {
+            // A different, non-banned app is positively in the foreground → user left.
             if (currentBannedApp != null) {
                 Log.d("ScrollDetection", "Left banned app: $currentBannedApp")
                 currentBannedApp = null
@@ -137,20 +155,25 @@ class ScrollDetectionService : Service() {
                 hideBorderOverlay()
             }
         }
+        // else: foreground == null → couldn't determine (entry event aged out of the
+        // query window, or the screen is off). Keep the current state so the border
+        // doesn't disappear while the user is still inside the banned app.
     }
 
     /**
-     * Returns the current foreground app by replaying UsageEvents over the last 60 seconds.
-     * Tracks the most recent event per package; the foreground app is the one whose last
-     * event is MOVE_TO_FOREGROUND with no subsequent MOVE_TO_BACKGROUND.
-     * This is more accurate than queryUsageStats whose lastTimeUsed lags several seconds
-     * after the user leaves an app.
+     * Returns the current foreground app by replaying UsageEvents over the last
+     * [FOREGROUND_LOOKBACK_MS]. Tracks the most recent event per package; the foreground
+     * app is the one whose last event is MOVE_TO_FOREGROUND with no subsequent
+     * MOVE_TO_BACKGROUND. Picking only packages whose latest event is MOVE_TO_FOREGROUND
+     * means a wide window stays correct — an app the user has switched away from has a
+     * newer MOVE_TO_BACKGROUND and is excluded. Returns null when nothing can be
+     * determined (e.g. no events at all in the window); callers treat that as "no change".
      */
     private fun getForegroundApp(): String? {
         return try {
             val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val now = System.currentTimeMillis()
-            val events = usm.queryEvents(now - 60_000, now)
+            val events = usm.queryEvents(now - FOREGROUND_LOOKBACK_MS, now)
             val event = UsageEvents.Event()
             // For each package, keep only the most recent event (type + timestamp)
             val lastEvent = mutableMapOf<String, Pair<Int, Long>>()
@@ -210,14 +233,15 @@ class ScrollDetectionService : Service() {
 
     // ── Red-border overlay ──────────────────────────────────────────────────────
 
-    private fun dp(value: Int): Int = TypedValue.applyDimension(
-        TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics
+    private fun dp(value: Float): Int = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics
     ).toInt()
 
     /**
-     * Draws a full-screen red border on top of the current (banned) app and fades
-     * it in from transparent to fully opaque over [thresholdSeconds] — so it grows
-     * more alarming the longer the user stays. Non-touchable, so it never blocks
+     * Draws a full-screen red border on top of the current (banned) app that
+     * continuously *pulses* (breathes in and out) while *slowly growing* thicker
+     * and more opaque over [thresholdSeconds] — so the screen feels increasingly
+     * boxed-in the longer the user stays. Non-touchable, so it never blocks
      * interaction. No-ops if the overlay permission isn't granted or it's already up.
      */
     private fun showBorderOverlay(thresholdSeconds: Long) {
@@ -232,7 +256,8 @@ class ScrollDetectionService : Service() {
 
         val border = GradientDrawable().apply {
             setColor(Color.TRANSPARENT)
-            setStroke(dp(36), Color.parseColor("#FF1B1B"))
+            cornerRadius = dp(BORDER_CORNER_DP.toFloat()).toFloat()
+            setStroke(dp(BORDER_MIN_DP.toFloat()), Color.parseColor("#FF1B1B"))
         }
         val view = View(this).apply {
             background = border
@@ -258,14 +283,45 @@ class ScrollDetectionService : Service() {
         try {
             wm.addView(view, params)
             overlayView = view
+            overlayBorder = border
         } catch (e: Exception) {
             Log.w("ScrollDetection", "Failed to add border overlay: ${e.message}")
             return
         }
 
+        // The pulse is a fast, infinitely-reversing breath (PULSE_PERIOD_MS per
+        // half-cycle). On top of it we layer a slow "growth" envelope derived from
+        // how long the user has been in the banned app: as growth → 1, the border's
+        // opacity floor rises and its stroke thickens, so the calm early pulse turns
+        // into an urgent, thick, near-solid frame by the time the threshold hits.
+        val startMs = System.currentTimeMillis()
+        val growthDurationMs = (thresholdSeconds * 1000L).coerceAtLeast(1000L)
+
         borderAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = (thresholdSeconds * 1000L).coerceAtLeast(1000L)
-            addUpdateListener { a -> overlayView?.alpha = a.animatedValue as Float }
+            duration = PULSE_PERIOD_MS
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { a ->
+                val pulse = a.animatedValue as Float // 0..1 breathing
+                val elapsed = (System.currentTimeMillis() - startMs).toFloat()
+                val growth = (elapsed / growthDurationMs).coerceIn(0f, 1f)
+                // Smooth one-time fade-in for the first FADE_IN_MS so the border
+                // eases up from invisible instead of snapping to the pulse floor.
+                val appear = (elapsed / FADE_IN_MS).coerceIn(0f, 1f)
+
+                // Opacity: floor and ceiling both climb with growth, and the pulse
+                // breathes between them; the whole thing fades in via [appear].
+                val minAlpha = 0.20f + 0.55f * growth        // 0.20 → 0.75
+                val maxAlpha = 0.50f + 0.50f * growth        // 0.50 → 1.00
+                overlayView?.alpha = (minAlpha + (maxAlpha - minAlpha) * pulse) * appear
+
+                // Thickness grows with the envelope and breathes a little with the pulse.
+                val baseDp = BORDER_MIN_DP + (BORDER_MAX_DP - BORDER_MIN_DP) * growth
+                val widthDp = baseDp * (0.9f + 0.1f * pulse)
+                overlayBorder?.setStroke(dp(widthDp), Color.parseColor("#FF1B1B"))
+                overlayView?.invalidate()
+            }
             start()
         }
     }
@@ -273,6 +329,7 @@ class ScrollDetectionService : Service() {
     private fun hideBorderOverlay() {
         borderAnimator?.cancel()
         borderAnimator = null
+        overlayBorder = null
         val view = overlayView ?: return
         try {
             windowManager?.removeView(view)

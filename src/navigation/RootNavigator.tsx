@@ -15,6 +15,7 @@ import WalletBackupScreen from '../screens/main/WalletBackupScreen';
 import {useAuth, AuthProvider} from '../services/AuthContext';
 import {View, ActivityIndicator} from 'react-native';
 import {ThemeProvider, useTheme} from '../context/ThemeContext';
+import {MonitoringProvider} from '../context/MonitoringContext';
 import AnimatedBackground from '../components/AnimatedBackground';
 
 export const PENDING_INVITE_KEY = 'pendingJoinGroupId';
@@ -127,7 +128,9 @@ const RootNavigator = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <NavigationContent />
+        <MonitoringProvider>
+          <NavigationContent />
+        </MonitoringProvider>
       </AuthProvider>
     </ThemeProvider>
   );

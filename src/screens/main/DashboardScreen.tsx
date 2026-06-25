@@ -21,6 +21,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { usePermissions } from '../../context/PermissionsContext';
+import { useMonitoring } from '../../context/MonitoringContext';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ColorScheme } from '../../theme/colors';
@@ -415,7 +416,8 @@ const DashboardScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const { user, signOut, refreshTokenBalance } = useAuth();
-  const { usageAccessGranted, refresh: refreshPermissions } = usePermissions();
+  const { refresh: refreshPermissions } = usePermissions();
+  const { refresh: refreshMonitoring } = useMonitoring();
   const [balance, setBalance]             = useState<string | null>(null);
   const [penaltyCount, setPenaltyCount]   = useState(0);
   const [penaltyCost, setPenaltyCost]     = useState(0);
@@ -550,6 +552,10 @@ const DashboardScreen = ({ navigation }: any) => {
       // which also drives the Settings-tab attention dot).
       refreshPermissions();
 
+      // Reconcile the foreground monitor on focus: starts it if a group is now
+      // active, or stops it if the user just left/ended their group and came home.
+      refreshMonitoring();
+
       groupService.getActiveGroupForUser(user.id).then(({ data, error }) => {
         if (error) return;
         const group = (data as any)?.groups;
@@ -566,7 +572,7 @@ const DashboardScreen = ({ navigation }: any) => {
           ScrollDetectionService.updateSettings({ bannedApps });
         }
       });
-    }, [user?.id, refreshPermissions]),
+    }, [user?.id, refreshPermissions, refreshMonitoring]),
   );
 
   // Pulse animation for active-group indicator
@@ -630,15 +636,10 @@ const DashboardScreen = ({ navigation }: any) => {
     return () => clearInterval(chartInterval);
   }, [currency]);
 
-  // Only run the foreground monitoring service when the user is in an active
-  // group AND has granted usage-access. Stop it in any other case.
-  useEffect(() => {
-    if (hasActiveGroup && usageAccessGranted) {
-      ScrollDetectionService.startMonitoring();
-    } else {
-      ScrollDetectionService.stopMonitoring();
-    }
-  }, [hasActiveGroup, usageAccessGranted]);
+  // Starting/stopping the foreground monitor is owned by MonitoringProvider
+  // (so it works on every screen, not just here). We only nudge it to
+  // reconcile when this screen regains focus — see the useFocusEffect below —
+  // which catches the "user just left/ended a group then came home" case.
 
   useEffect(() => {
     fetchBalance();

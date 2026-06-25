@@ -19,6 +19,7 @@ import { xrplService } from '../../services/XrplService';
 import { useAuth } from '../../services/AuthContext';
 import { groupService } from '../../services/GroupService';
 import { ScrollDetectionService } from '../../services/ScrollDetectionService';
+import { useMonitoring } from '../../context/MonitoringContext';
 import * as Keychain from 'react-native-keychain';
 import { treasuryService } from '../../services/TreasuryService';
 
@@ -33,6 +34,7 @@ const CreateGroupScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const { user } = useAuth();
+  const { refresh: refreshMonitoring } = useMonitoring();
   const [name, setName] = useState('');
   const [deposit, setDeposit] = useState('10');
   const [penalty, setPenalty] = useState('0.5');
@@ -161,6 +163,11 @@ const CreateGroupScreen = ({ navigation }: any) => {
             );
           }
         }
+        // Start the foreground monitor now that an active group exists, so
+        // detection runs even if the user leaves the app from GroupDashboard
+        // without ever returning to the home tab. Fire-and-forget: navigation
+        // unmounts this screen, but MonitoringProvider lives above the navigator.
+        refreshMonitoring();
         navigation.replace('GroupDashboard', { groupId: data.id });
       }
     } catch (e: any) {

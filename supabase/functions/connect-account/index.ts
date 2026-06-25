@@ -67,6 +67,9 @@ serve(async (req: Request) => {
     if (provider === 'chesscom' || provider === 'leetcode') {
       username = String(body.username ?? '').trim()
       if (!username) return json({ ok: false, error: 'username_required' }, 400)
+      // Chess.com is case-insensitive — store the canonical lowercase handle so later
+      // settle-time stats reads resolve directly (no 301). LeetCode is case-sensitive.
+      if (provider === 'chesscom') username = username.toLowerCase()
       const exists = provider === 'chesscom'
         ? await chesscomExists(username)
         : await leetcodeExists(username)
@@ -106,7 +109,13 @@ serve(async (req: Request) => {
       { user_id: user.id, provider, external_username: username, connected_at: new Date().toISOString() },
       { onConflict: 'user_id,provider' },
     )
-    if (caErr) throw new Error('account_link_failed')
+    if (caErr) {
+      // Surface the underlying Postgres failure (code/details/hint) — otherwise the
+      // generic 'account_link_failed' hides the real cause (missing table, missing
+      // UNIQUE(user_id,provider) for the ON CONFLICT, column mismatch, etc.).
+      console.error('connected_accounts upsert failed:', caErr)
+      throw new Error('account_link_failed')
+    }
   } catch (e) {
     console.error('connect-account error:', e)
     return json({ ok: false, error: String((e as Error)?.message ?? 'connect_failed') }, 502)

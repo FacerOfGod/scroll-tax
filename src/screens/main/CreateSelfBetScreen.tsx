@@ -24,6 +24,7 @@ import {
 } from '../../services/SelfBetService';
 
 const DAY_PRESETS = [1, 3, 7, 14];
+const STAKE_PRESETS = { tokens: [10, 20, 50, 100], xrp: [1, 5, 10, 25] } as const;
 
 const CreateSelfBetScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
@@ -233,14 +234,43 @@ const CreateSelfBetScreen = ({ navigation }: any) => {
                   placeholder="20"
                   placeholderTextColor={colors.textMuted}
                 />
+                <View style={styles.presetRow}>
+                  {STAKE_PRESETS[stakeType].map(s => (
+                    <TouchableOpacity key={s} style={styles.preset} onPress={() => setStake(String(s))}>
+                      <Text style={styles.presetText}>{s}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
-              <View style={styles.infoBox}>
-                <Text style={styles.infoTitle}>How it works</Text>
-                <Text style={styles.infoText}>
+              {/* Live payoff summary */}
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Goal</Text>
+                  <Text style={styles.summaryValue}>
+                    {target || '—'} {meta?.metricNoun} in {days || '—'} day{days === '1' ? '' : 's'}
+                  </Text>
+                </View>
+                <View style={styles.summarySep} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>You stake</Text>
+                  <Text style={styles.summaryValue}>
+                    {stake || '—'} {stakeType === 'xrp' ? 'XRP' : 'Tokens'}
+                  </Text>
+                </View>
+                <View style={styles.summarySep} />
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: colors.secondary }]}>If you win</Text>
+                  <Text style={[styles.summaryValue, { color: colors.secondary }]}>Stake back</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: colors.error }]}>If you miss</Text>
+                  <Text style={[styles.summaryValue, { color: colors.error }]}>Stake forfeited</Text>
+                </View>
+                <Text style={styles.summaryFootnote}>
                   {stakeType === 'tokens'
-                    ? 'Your stake is locked now. Hit the goal in time and it returns to your balance — miss it and it\'s forfeited.'
-                    : 'Your stake is escrowed to the app treasury now. Hit the goal in time and it\'s refunded to your wallet — miss it and it\'s forfeited.'}
+                    ? 'Your stake is locked now and returns to your balance the moment you hit the goal.'
+                    : 'Your stake is escrowed to the app treasury now and refunded to your wallet when you hit the goal.'}
                 </Text>
               </View>
 
@@ -334,16 +364,27 @@ const createStyles = (colors: ColorScheme) =>
     stakeTypeBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
     stakeTypeBtnText: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
     stakeTypeBtnTextActive: { color: '#FFF' },
-    infoBox: {
+    summaryCard: {
       backgroundColor: 'rgba(255, 83, 0, 0.08)',
       padding: 16,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: 'rgba(255, 83, 0, 0.25)',
-      gap: 8,
+      gap: 10,
     },
-    infoTitle: { color: colors.primary, fontWeight: '700', fontSize: 14 },
-    infoText: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
+    summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    summaryLabel: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+    summaryValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
+    summarySep: { height: 1, backgroundColor: 'rgba(255, 83, 0, 0.18)' },
+    summaryFootnote: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 4,
+      paddingTop: 10,
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(255, 83, 0, 0.18)',
+    },
     primaryBtn: {
       backgroundColor: colors.primary,
       height: 58,

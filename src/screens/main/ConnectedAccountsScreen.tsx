@@ -72,12 +72,14 @@ const ConnectedAccountsScreen = ({ navigation }: any) => {
       setUsernameDraft('');
       loadAccounts();
     } else {
-      Alert.alert(
-        'Could not connect',
+      const label = PROVIDER_META[provider].label;
+      const msg =
         res.error === 'username_not_found'
-          ? `No ${PROVIDER_META[provider].label} user named "${username}".`
-          : res.error || 'Try again.',
-      );
+          ? `No ${label} user named "${username}". Check the spelling and try again.`
+          : /_api_error/.test(res.error ?? '')
+            ? `${label} is unavailable right now. Try again in a moment.`
+            : res.error || 'Try again.';
+      Alert.alert('Could not connect', msg);
     }
   };
 

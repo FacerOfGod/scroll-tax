@@ -23,6 +23,15 @@ export const METRIC_FOR: Record<Provider, Metric> = {
 
 const UA = 'ScrollTax/1.0 (self-bet verifier)';
 
+// External APIs (esp. chess.com behind Cloudflare) can stall from datacenter IPs.
+// Without a timeout a hung request runs until the edge runtime force-terminates the
+// whole isolate ("early termination" / wall-clock warning). Bound every call so a
+// slow upstream fails fast and surfaces as a normal error instead of killing the fn.
+const FETCH_TIMEOUT_MS = 8000;
+function fetchT(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+}
+
 // ─── GitHub ──────────────────────────────────────────────────────────────────
 // Uses the authenticated viewer's contributionsCollection so no username is
 // needed and private contributions the user can see are included. Counts commits
@@ -36,7 +45,7 @@ export async function githubCommitsInWindow(token: string, sinceISO: string): Pr
         }
       }
     }`;
-  const resp = await fetch('https://api.github.com/graphql', {
+  const resp = await fetchT('https://api.github.com/graphql', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -55,7 +64,7 @@ export async function githubCommitsInWindow(token: string, sinceISO: string): Pr
 }
 
 export async function githubLogin(token: string): Promise<string | null> {
-  const resp = await fetch('https://api.github.com/user', {
+  const resp = await fetchT('https://api.github.com/user', {
     headers: { Authorization: `Bearer ${token}`, 'User-Agent': UA },
   });
   if (!resp.ok) return null;
@@ -73,7 +82,7 @@ export interface StravaTokens {
 export async function exchangeStravaCode(
   clientId: string, clientSecret: string, code: string,
 ): Promise<StravaTokens> {
-  const resp = await fetch('https://www.strava.com/oauth/token', {
+  const resp = await fetchT('https://www.strava.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -90,7 +99,7 @@ export async function exchangeStravaCode(
 export async function refreshStravaToken(
   clientId: string, clientSecret: string, refreshToken: string,
 ): Promise<StravaTokens> {
-  const resp = await fetch('https://www.strava.com/oauth/token', {
+  const resp = await fetchT('https://www.strava.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -105,7 +114,7 @@ export async function refreshStravaToken(
 }
 
 export async function stravaAthlete(token: string): Promise<{ id: number; username: string } | null> {
-  const resp = await fetch('https://www.strava.com/api/v3/athlete', {
+  const resp = await fetchT('https://www.strava.com/api/v3/athlete', {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!resp.ok) return null;
@@ -120,7 +129,7 @@ export async function stravaRunsInWindow(token: string, sinceISO: string): Promi
   let runs = 0;
   // Page through up to ~1000 activities (10 pages) — ample for a bet window.
   while (page <= 10) {
-    const resp = await fetch(
+    const resp = await fetchT(
       `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=100&page=${page}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
@@ -135,19 +144,32 @@ export async function stravaRunsInWindow(token: string, sinceISO: string): Promi
 }
 
 // ─── Chess.com (public, no auth) ─────────────────────────────────────────────
+// Chess.com usernames are case-insensitive and canonically lowercase: the API
+// 301-redirects a mixed-case path (e.g. /FacerOfGod) to the lowercase one. We
+// normalise up front so we don't depend on redirect-following (brittle from
+// serverless/datacenter IPs) and so the stats endpoint resolves directly.
+const chessUser = (username: string) => encodeURIComponent(username.trim().toLowerCase());
+
 export async function chesscomExists(username: string): Promise<boolean> {
-  const resp = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(username)}`, {
+  const resp = await fetchT(`https://api.chess.com/pub/player/${chessUser(username)}`, {
     headers: { 'User-Agent': UA },
   });
-  return resp.ok;
+  if (resp.status === 404) return false;
+  // A 403 (Cloudflare block) / 429 (rate limit) / 5xx is NOT "user doesn't exist".
+  // Surface it so the caller reports the real cause instead of "username not found".
+  if (!resp.ok) throw new Error(`chesscom_api_error_${resp.status}`);
+  return true;
 }
 
 // Lifetime wins across all time controls.
 export async function chesscomTotalWins(username: string): Promise<number> {
-  const resp = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(username)}/stats`, {
+  const resp = await fetchT(`https://api.chess.com/pub/player/${chessUser(username)}/stats`, {
     headers: { 'User-Agent': UA },
   });
-  if (!resp.ok) return 0;
+  if (resp.status === 404) return 0;
+  // Throw rather than read 0 on an API error: a silent 0 at settle time could turn a
+  // winnable bet into a forfeit.
+  if (!resp.ok) throw new Error(`chesscom_api_error_${resp.status}`);
   const s = await resp.json();
   const buckets = ['chess_rapid', 'chess_blitz', 'chess_bullet', 'chess_daily'];
   return buckets.reduce((sum, b) => sum + (s?.[b]?.record?.win ?? 0), 0);
@@ -162,7 +184,7 @@ async function leetcodeQuery(username: string): Promise<any> {
         submitStatsGlobal { acSubmissionNum { difficulty count } }
       }
     }`;
-  const resp = await fetch('https://leetcode.com/graphql', {
+  const resp = await fetchT('https://leetcode.com/graphql', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

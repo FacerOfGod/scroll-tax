@@ -16,6 +16,7 @@ import { groupService } from '../../services/GroupService';
 import { xrplService } from '../../services/XrplService';
 import { tokenService } from '../../services/TokenService';
 import { ScrollDetectionService } from '../../services/ScrollDetectionService';
+import { useMonitoring } from '../../context/MonitoringContext';
 import { ColorScheme } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../services/AuthContext';
@@ -34,6 +35,7 @@ export default function GroupDashboardScreen() {
   const route = useRoute<GroupDashboardRouteProp>();
   const navigation = useNavigation<any>();
   const { user } = useAuth();
+  const { refresh: refreshMonitoring } = useMonitoring();
   const { groupId } = route.params as { groupId: string };
   const [group, setGroup] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -76,11 +78,17 @@ export default function GroupDashboardScreen() {
       setGroup(data);
       // Push monitoring settings to the native service so detection works even if
       // the user created the group and landed here without returning to Dashboard.
-      if (data.status === 'active' && data.banned_apps?.length > 0) {
-        // Push banned apps only — do NOT override thresholdSeconds here.
-        // DashboardScreen sets it to 30 s on focus; overriding with the
-        // group's penalty_trigger_time_minutes (30 min) would make testing impossible.
-        ScrollDetectionService.updateSettings({ bannedApps: data.banned_apps });
+      if (data.status === 'active') {
+        if (data.banned_apps?.length > 0) {
+          // Push banned apps only — do NOT override thresholdSeconds here.
+          // The monitoring controller sets it to 30 s; overriding with the
+          // group's penalty_trigger_time_minutes (30 min) would make testing impossible.
+          ScrollDetectionService.updateSettings({ bannedApps: data.banned_apps });
+        }
+        // Reconcile the foreground monitor. The controller only starts it if the
+        // current user is actually an active member of an active group, so this is
+        // a safe no-op for non-members viewing an invite.
+        refreshMonitoring();
       }
       // Animate content in after data arrives so the view is always mounted first
       contentAnim.setValue(0);

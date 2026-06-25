@@ -4,6 +4,7 @@ import * as Keychain from 'react-native-keychain';
 import {xrplService} from '../services/XrplService';
 import {tokenService} from '../services/TokenService';
 import {selfBetService, ACCOUNT_CONNECTED_EVENT} from '../services/SelfBetService';
+import {ScrollDetectionService} from '../services/ScrollDetectionService';
 import {supabase} from './supabaseClient';
 import {Session} from '@supabase/supabase-js';
 
@@ -218,6 +219,12 @@ export const AuthProvider: React.FC<{children: React.ReactNode}> = ({children}) 
   };
 
   const signOut = async () => {
+    // Tear down the device-global foreground monitor immediately. It is NOT
+    // per-account, so without this an active group from the previous user would
+    // keep monitoring (and its notification) running after switching accounts.
+    // MonitoringProvider also reconciles on user change, but stopping here makes
+    // the teardown immediate and independent of provider timing.
+    ScrollDetectionService.stopMonitoring();
     await supabase.auth.signOut();
     setUser(null);
     setSession(null);
